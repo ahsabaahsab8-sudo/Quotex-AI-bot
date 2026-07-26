@@ -1,0 +1,18 @@
+import json, os
+
+session_file = "session.json"
+data = {}
+if os.path.exists(session_file):
+    with open(session_file, encoding="utf-8") as f:
+        data = json.load(f)
+
+data["slamismai8@gmail.com"] = {
+    "cookies": 'lang=en; _ga=GA1.1.766764179.1783150091; OTCTooltip={%22value%22:false}; __vid1=d5231b4b19b59872c944bf0a73728d07; lid=1576599; nas=[%22EURUSD_otc%22%2C%22EURCAD_otc%22%2C%22EURNZD_otc%22%2C%22USDZAR_otc%22%2C%22USDCAD_otc%22%2C%22GBPJPY_otc%22%2C%22EURAUD_otc%22%2C%22CADCHF_otc%22%2C%22USDPHP_otc%22%2C%22USDMXN_otc%22%2C%22USDJPY%22%2C%22BRLUSD_otc%22%2C%22USDPKR_otc%22%2C%22GBPJPY%22%2C%22USDNGN_otc%22%2C%22USDARS_otc%22%2C%22USDIDR_otc%22%2C%22EURUSD%22%2C%22USDEGP_otc%22%2C%22TRUUSD_otc%22%2C%22LTCUSD_otc%22%2C%22NZDCHF_otc%22%2C%22TONUSD_otc%22%2C%22EURJPY%22%2C%22AUDNZD_otc%22%2C%22AVAUSD_otc%22%2C%22LINUSD_otc%22%2C%22GBPUSD%22%2C%22AUDJPY%22%2C%22USDJPY_otc%22%2C%22NZDUSD_otc%22%2C%22AUDUSD_otc%22%2C%22GBPUSD_otc%22%2C%22EURJPY_otc%22%2C%22AUDCHF_otc%22%2C%22USDINR_otc%22%2C%22GBPAUD_otc%22%2C%22GBPCHF_otc%22%2C%22GBPCAD_otc%22%2C%22CHFJPY_otc%22%2C%22GBPNZD_otc%22%2C%22AUDCAD_otc%22%2C%22CADJPY_otc%22%2C%22USDDZD_otc%22%2C%22USDCHF_otc%22%2C%22EURCHF_otc%22%2C%22USDCOP_otc%22%2C%22XAUUSD_otc%22%2C%22XAGUSD_otc%22%2C%22EURGBP%22%2C%22NZDCAD_otc%22%2C%22XRPUSD_otc%22%2C%22AUDUSD%22%2C%22EURAUD%22%2C%22AUDCAD%22%2C%22GBPCAD%22%2C%22AUDCHF%22%2C%22CADJPY%22%2C%22USDBDT_otc%22%2C%22ETHUSD_otc%22%2C%22XAUUSD%22%2C%22NZDJPY_otc%22%2C%22SOLUSD_otc%22%2C%22EURCHF%22%2C%22GBPCHF%22%2C%22ATOUSD_otc%22%2C%22BTCUSD_otc%22%2C%22AXSUSD_otc%22%2C%22BCHUSD_otc%22%2C%22BNBUSD_otc%22%2C%22DOTUSD_otc%22%2C%22DASUSD_otc%22%2C%22ETCUSD_otc%22%2C%22UKBrent_otc%22%2C%22USCrude_otc%22%2C%22AUDJPY_otc%22]; z=[[%22graph%22%2C2%2C0%2C0%2C0.8333333]]; _ga_L4T5GBPFHJ=GS2.1.s1784465253$o77$g1$t1784465258$j55$l0$h0; activeAccount=live',
+    "token": "jtZWqPTaXGTb554G3XFEbERWt0EuDV4p71T7VBWs",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+}
+
+with open(session_file, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+
+print("session.json updated with fresh cookie + token")

@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.log
+*.pyc
+scratch/batch_*.json
+scratch/sub1a.json
