@@ -8,6 +8,9 @@ import requests
 import pandas as pd
 import numpy as np
 import ta
+import imaplib
+import email as email_lib
+import re
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -18,9 +21,57 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
+# ─── AUTO OTP READER FROM EMAIL ──────────────────────────────────────
+
+async def auto_otp_callback(message):
+    imap_user = os.getenv("IMAP_EMAIL") or os.getenv("QUOTEX_EMAIL")
+    imap_pass = os.getenv("IMAP_PASSWORD")
+    if not imap_pass:
+        logger.error("IMAP_PASSWORD not set. Cannot auto-read OTP.")
+        return None
+    try:
+        mail = imaplib.IMAP4_SSL("imap.gmail.com")
+        mail.login(imap_user, imap_pass)
+        mail.select("inbox")
+        for _ in range(30):
+            _, data = mail.search(None, '(FROM "quotex" UNSEEN)')
+            for num in reversed(data[0].split()):
+                _, msg_data = mail.fetch(num, "(RFC822)")
+                body = email_lib.message_from_bytes(msg_data[0][1])
+                if body.is_multipart():
+                    text = ""
+                    for part in body.walk():
+                        if part.get_content_type() == "text/plain":
+                            text = part.get_payload(decode=True).decode(errors='ignore')
+                            break
+                else:
+                    text = body.get_payload(decode=True).decode(errors='ignore')
+                match = re.search(r'\b(\d{4,6})\b', text)
+                if match:
+                    return match.group(1)
+            await asyncio.sleep(1)
+        logger.warning("OTP not found in email after 30s")
+        return None
+    except Exception as e:
+        logger.error(f"IMAP OTP read failed: {e}")
+        return None
+
+
 # ─── QUOTEX CONNECTION ───────────────────────────────────────────────
 
+_quotex_client = None
+
 async def get_quotex_connection():
+    global _quotex_client
+
+    if _quotex_client is not None:
+        try:
+            check = await _quotex_client.check_connect()
+            if check:
+                return _quotex_client
+        except Exception:
+            pass
+
     from pyquotex.stable_api import Quotex
     from pyquotex.network.login import Login
 
@@ -29,23 +80,32 @@ async def get_quotex_connection():
 
     email = os.getenv("QUOTEX_EMAIL")
     password = os.getenv("QUOTEX_PASSWORD")
+    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
     client = Quotex(
         email=email,
         password=password,
         lang="en",
         host="market-qx.trade",
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        user_agent=ua,
+        on_otp_callback=auto_otp_callback
     )
     client.account_is_demo = 0
 
     ok, reason = await client.connect()
     if not ok:
-        logger.error(f"Quotex connection failed: {reason}")
-        raise ConnectionError(f"Quotex connection failed: {reason}")
+        logger.warning(f"Connection failed ({reason}), clearing stale session and retrying...")
+        if client.api:
+            await client.api.close()
+        client.set_session(user_agent=ua, cookies=None, ssid=None)
+        ok, reason = await client.connect()
+        if not ok:
+            logger.error(f"Quotex connection failed after retry: {reason}")
+            raise ConnectionError(f"Quotex connection failed: {reason}")
 
+    _quotex_client = client
     logger.info("Quotex connected successfully")
-    return client
+    return _quotex_client
 
 
 # ─── INDICATOR CALCULATION ───────────────────────────────────────────
