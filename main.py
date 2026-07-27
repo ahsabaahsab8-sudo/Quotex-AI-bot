@@ -61,7 +61,7 @@ async def auto_otp_callback(message):
 _quotex_client = None
 
 def _patch_pyquotex_for_proxy(proxy_str: str | None):
-    from curl_cffi.requests import AsyncSession, BrowserType
+    from curl_cffi.requests import AsyncSession
     from pyquotex.network import navigator
     from pyquotex.ws import client as ws_client_module
     import websockets
@@ -88,14 +88,17 @@ def _patch_pyquotex_for_proxy(proxy_str: str | None):
         def json(self): return self._r.json()
         def __getattr__(self, name): return getattr(self._r, name)
 
-    sess = AsyncSession(browser=BrowserType.chrome120, proxy=proxy_str)
+    sess = AsyncSession()
 
     orig_send = navigator.Browser.send_request
     async def _send_request(self, method, url, headers=None, **kwargs):
         merged_headers = self.headers or {}
         if headers:
             merged_headers.update(headers)
-        resp = await sess.request(method, url, headers=merged_headers, **kwargs)
+        resp = await sess.request(
+            method, url, headers=merged_headers,
+            impersonate="chrome120", proxy=proxy_str, **kwargs
+        )
         wrapper = _Resp(resp)
         self.response = wrapper
         return wrapper
