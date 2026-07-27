@@ -298,7 +298,7 @@ def main():
     app.add_handler(CallbackQueryHandler(back_start, pattern="^back_start$"))
     app.add_error_handler(error_handler)
     logger.info("Bot started. Waiting for Telegram commands...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling(allowed_updates=Update.ALL_TYPES, timeout=0)
 
 
 if __name__ == "__main__":

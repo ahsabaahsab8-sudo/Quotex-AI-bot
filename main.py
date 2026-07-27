@@ -61,34 +61,46 @@ async def auto_otp_callback(message):
 _quotex_client = None
 
 def _patch_pyquotex_for_proxy(proxy_str: str | None):
-    """Route pyquotex traffic: cloudscraper for HTTP (bypasses CF), direct WS."""
-    import cloudscraper
-    import asyncio
+    from curl_cffi.requests import AsyncSession, BrowserType
     from pyquotex.network import navigator
     from pyquotex.ws import client as ws_client_module
     import websockets
 
-    # Replace Browser.send_request with cloudscraper (synchronous, bypasses Cloudflare)
-    scraper = cloudscraper.create_scraper(
-        browser={"browser": "chrome", "platform": "windows", "mobile": False}
-    )
-    if proxy_str:
-        scraper.proxies.update({"http": proxy_str, "https": proxy_str})
+    class _Resp:
+        def __init__(self, resp):
+            self._r = resp
+        @property
+        def is_success(self): return 200 <= self._r.status_code < 300
+        @property
+        def reason_phrase(self): return "OK" if self.is_success else "Forbidden"
+        @property
+        def status_code(self): return self._r.status_code
+        @property
+        def url(self):
+            from httpx import URL
+            return URL(str(self._r.url))
+        @property
+        def content(self): return self._r.content
+        @property
+        def headers(self): return self._r.headers
+        @property
+        def text(self): return self._r.text
+        def json(self): return self._r.json()
+        def __getattr__(self, name): return getattr(self._r, name)
+
+    sess = AsyncSession(browser=BrowserType.chrome120, proxy=proxy_str)
 
     orig_send = navigator.Browser.send_request
     async def _send_request(self, method, url, headers=None, **kwargs):
         merged_headers = self.headers or {}
         if headers:
             merged_headers.update(headers)
-        resp = await asyncio.to_thread(
-            scraper.request, method, url,
-            headers=merged_headers, **kwargs
-        )
-        self.response = resp
-        return resp
+        resp = await sess.request(method, url, headers=merged_headers, **kwargs)
+        wrapper = _Resp(resp)
+        self.response = wrapper
+        return wrapper
     navigator.Browser.send_request = _send_request
 
-    # WebSocket patch (no proxy needed - WS connects directly from Railway)
     orig_ws = ws_client_module.WebsocketClient._connect_once
     async def _ws_connect(self, url, extra_headers, ssl):
         headers = extra_headers or {}
