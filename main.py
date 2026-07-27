@@ -60,6 +60,98 @@ async def auto_otp_callback(message):
 
 _quotex_client = None
 
+
+async def login_via_browser() -> tuple[str, str, str]:
+    """Log into Quotex via headless Chrome to bypass Cloudflare.
+    Returns (cookies_str, ssid_token, user_agent).
+    """
+    from playwright.async_api import async_playwright
+
+    email = os.getenv("QUOTEX_EMAIL")
+    password = os.getenv("QUOTEX_PASSWORD")
+    if not email or not password:
+        raise ConnectionError("QUOTEX_EMAIL or QUOTEX_PASSWORD not set")
+
+    logger.info("Launching headless Chrome to bypass Cloudflare...")
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-gpu",
+            ],
+        )
+        context = await browser.new_context(
+            viewport={"width": 1280, "height": 720},
+            locale="en-US",
+            timezone_id="America/New_York",
+        )
+        page = await context.new_page()
+        await page.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+        )
+
+        await page.goto(
+            "https://market-qx.trade/en/sign-in/modal/",
+            wait_until="networkidle",
+            timeout=90000,
+        )
+        await page.wait_for_selector(
+            "input[name='email'], input[type='email']", timeout=30000
+        )
+        await page.fill("input[name='email']", email)
+        await page.fill("input[name='password']", password)
+        await page.click("button[type='submit'], input[type='submit']")
+
+        await page.wait_for_timeout(2000)
+        from playwright.async_api import TimeoutError as PlaywrightTimeout
+
+        try:
+            otp_input = page.locator("input[name='code'], input[name='pin']").first
+            if await otp_input.is_visible(timeout=5000):
+                otp = await auto_otp_callback(None)
+                if otp:
+                    await otp_input.fill(otp)
+                    await page.click("button[type='submit'], input[type='submit']")
+                    await page.wait_for_timeout(3000)
+        except (PlaywrightTimeout, Exception):
+            pass
+
+        try:
+            await page.wait_for_url("**/trade**", timeout=30000)
+        except PlaywrightTimeout:
+            await page.goto(
+                "https://market-qx.trade/en/trade",
+                wait_until="networkidle",
+                timeout=30000,
+            )
+
+        cookies = await context.cookies()
+        cookie_str = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
+        ssid = await page.evaluate(
+            "window.settings?.token || window.settings?.ssid || ''"
+        )
+
+        if not ssid:
+            await page.reload(wait_until="networkidle")
+            await page.wait_for_timeout(2000)
+            ssid = await page.evaluate(
+                "window.settings?.token || window.settings?.ssid || ''"
+            )
+
+        user_agent = await page.evaluate("navigator.userAgent")
+        await browser.close()
+
+        if not ssid or not cookie_str:
+            raise ConnectionError("Browser login succeeded but no SSID/cookies found")
+
+        logger.info("Browser login successful")
+        return cookie_str, ssid, user_agent
+
+
 def _patch_pyquotex_for_proxy(proxy_str: str | None):
     from curl_cffi.requests import AsyncSession
     from pyquotex.network import navigator
@@ -172,12 +264,20 @@ async def get_quotex_connection():
         if proxies:
             client.proxies = proxies
         ok, reason = await client.connect()
-        if not ok:
-            if "403" in reason or "Forbidden" in reason:
-                logger.error(
-                    "Cloudflare is blocking the server IP. "
+        if not ok and ("403" in reason or "Forbidden" in reason):
+            logger.info("HTTP login blocked by Cloudflare. Trying browser-based login...")
+            try:
+                cookie_str, ssid, browser_ua = await login_via_browser()
+                client.set_session(user_agent=browser_ua, cookies=cookie_str, ssid=ssid)
+                if proxies:
+                    client.proxies = proxies
+                ok, reason = await client.connect()
+            except Exception as e:
+                raise ConnectionError(
+                    f"Cloudflare blocks this server IP and browser login also failed: {e}. "
                     "Set QUOTEX_PROXY in .env to a residential proxy URL."
                 )
+        if not ok:
             raise ConnectionError(f"Quotex connection failed: {reason}")
 
     _quotex_client = client
