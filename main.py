@@ -66,19 +66,35 @@ def _patch_pyquotex_for_proxy(proxy_str: str | None):
         return
     import websockets
     from pyquotex.ws import client as ws_client_module
+    from pyquotex.network import navigator
 
     # httpx reads HTTP_PROXY / HTTPS_PROXY env vars automatically (trust_env=True)
     os.environ["HTTP_PROXY"] = proxy_str
     os.environ["HTTPS_PROXY"] = proxy_str
 
+    # Add browser client-hint headers that Cloudflare requires
+    orig_browser_h = navigator.Browser.get_headers
+    def _get_headers(self):
+        h = orig_browser_h(self)
+        h.update({
+            "sec-ch-ua": '"Google Chrome";v="127", "Chromium";v="127", "Not?A_Brand";v="99"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "sec-ch-ua-arch": '"x86"',
+            "sec-ch-ua-full-version": '"127.0.6533.120"',
+            "sec-ch-ua-platform-version": '"15.0.0"',
+            "sec-ch-ua-bitness": '"64"',
+        })
+        return h
+    navigator.Browser.get_headers = _get_headers
+
     # WebSocket doesn't read env vars – patch it explicitly
     orig_ws_connect = ws_client_module.WebsocketClient._connect_once
     async def _ws_connect(self, url, extra_headers, ssl):
         headers = extra_headers or {}
-        ws_proxy = proxy_str if proxy_str.startswith("http") else None
         async with websockets.connect(
             url, additional_headers=headers, ssl=ssl,
-            proxy=ws_proxy, ping_interval=24, ping_timeout=20,
+            ping_interval=24, ping_timeout=20,
             max_size=2**23, compression=None,
         ) as ws:
             self._ws = ws
