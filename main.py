@@ -152,49 +152,10 @@ async def login_via_browser() -> tuple[str, str, str]:
         return cookie_str, ssid, user_agent
 
 
-def _patch_pyquotex_for_proxy(proxy_str: str | None):
-    from curl_cffi.requests import AsyncSession
-    from pyquotex.network import navigator
+def _patch_pyquotex_ws_only():
+    """Patch only WebSocket connection to ensure it works directly."""
     from pyquotex.ws import client as ws_client_module
     import websockets
-
-    class _Resp:
-        def __init__(self, resp):
-            self._r = resp
-        @property
-        def is_success(self): return 200 <= self._r.status_code < 300
-        @property
-        def reason_phrase(self): return "OK" if self.is_success else "Forbidden"
-        @property
-        def status_code(self): return self._r.status_code
-        @property
-        def url(self):
-            from httpx import URL
-            return URL(str(self._r.url))
-        @property
-        def content(self): return self._r.content
-        @property
-        def headers(self): return self._r.headers
-        @property
-        def text(self): return self._r.text
-        def json(self): return self._r.json()
-        def __getattr__(self, name): return getattr(self._r, name)
-
-    sess = AsyncSession()
-
-    orig_send = navigator.Browser.send_request
-    async def _send_request(self, method, url, headers=None, **kwargs):
-        merged_headers = self.headers or {}
-        if headers:
-            merged_headers.update(headers)
-        resp = await sess.request(
-            method, url, headers=merged_headers,
-            impersonate="chrome120", proxy=proxy_str, **kwargs
-        )
-        wrapper = _Resp(resp)
-        self.response = wrapper
-        return wrapper
-    navigator.Browser.send_request = _send_request
 
     orig_ws = ws_client_module.WebsocketClient._connect_once
     async def _ws_connect(self, url, extra_headers, ssl):
@@ -222,8 +183,7 @@ def _patch_pyquotex_for_proxy(proxy_str: str | None):
 async def get_quotex_connection():
     global _quotex_client
 
-    proxy_str = os.getenv("QUOTEX_PROXY", "").strip()
-    _patch_pyquotex_for_proxy(proxy_str or None)
+    _patch_pyquotex_ws_only()
 
     if _quotex_client is not None:
         try:
@@ -242,7 +202,6 @@ async def get_quotex_connection():
     email = os.getenv("QUOTEX_EMAIL")
     password = os.getenv("QUOTEX_PASSWORD")
     ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    proxies = {"http": proxy_str, "https": proxy_str} if proxy_str else None
 
     client = Quotex(
         email=email,
@@ -250,38 +209,35 @@ async def get_quotex_connection():
         lang="en",
         host="market-qx.trade",
         user_agent=ua,
-        proxies=proxies,
-        on_otp_callback=auto_otp_callback
+        on_otp_callback=auto_otp_callback,
     )
     client.account_is_demo = 0
 
+    # Try connecting with existing session (may be stale)
+    logger.info("Attempting Quotex connection with existing session...")
+    ok, reason = await client.connect()
+    if ok:
+        _quotex_client = client
+        logger.info("Quotex connected with existing session")
+        return _quotex_client
+
+    logger.warning(f"Session failed ({reason}), clearing and trying browser login...")
+    if client.api:
+        await client.api.close()
+    client.set_session(user_agent=ua, cookies=None, ssid=None)
+
+    logger.info("Launching headless Chrome to bypass Cloudflare and login...")
+    cookie_str, ssid, browser_ua = await login_via_browser()
+    client.set_session(user_agent=browser_ua, cookies=cookie_str, ssid=ssid)
+
     ok, reason = await client.connect()
     if not ok:
-        logger.warning(f"Connection failed ({reason}), clearing stale session and retrying...")
-        if client.api:
-            await client.api.close()
-        client.set_session(user_agent=ua, cookies=None, ssid=None)
-        if proxies:
-            client.proxies = proxies
-        ok, reason = await client.connect()
-        if not ok and ("403" in reason or "Forbidden" in reason):
-            logger.info("HTTP login blocked by Cloudflare. Trying browser-based login...")
-            try:
-                cookie_str, ssid, browser_ua = await login_via_browser()
-                client.set_session(user_agent=browser_ua, cookies=cookie_str, ssid=ssid)
-                if proxies:
-                    client.proxies = proxies
-                ok, reason = await client.connect()
-            except Exception as e:
-                raise ConnectionError(
-                    f"Cloudflare blocks this server IP and browser login also failed: {e}. "
-                    "Set QUOTEX_PROXY in .env to a residential proxy URL."
-                )
-        if not ok:
-            raise ConnectionError(f"Quotex connection failed: {reason}")
+        raise ConnectionError(
+            f"Quotex connection failed after browser login: {reason}"
+        )
 
     _quotex_client = client
-    logger.info("Quotex connected successfully")
+    logger.info("Quotex connected successfully (browser login)")
     return _quotex_client
 
 
