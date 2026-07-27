@@ -11,7 +11,7 @@ import ta
 import imaplib
 import email as email_lib
 import re
-from datetime import datetime, timezone, timedelta
+import functools
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -61,8 +61,73 @@ async def auto_otp_callback(message):
 
 _quotex_client = None
 
+def _patch_pyquotex_for_proxy(proxy_str: str | None):
+    """Monkey-patch pyquotex to route all HTTP + WebSocket traffic through proxy."""
+    if not proxy_str:
+        return
+    import httpx
+    import websockets
+    from pyquotex.network import navigator
+    from pyquotex import api as api_module
+    from pyquotex.ws import client as ws_client_module
+    from pyquotex.network.login import Login
+
+    # 1. Browser: make httpx client respect proxy (accept both str and dict)
+    orig_browser_init = navigator.Browser.__init__
+    def _browser_init(self, *args, **kwargs):
+        orig_browser_init(self, *args, **kwargs)
+        if self.proxies:
+            self._client = httpx.AsyncClient(
+                verify=self._ssl_context,
+                timeout=30.0,
+                follow_redirects=True,
+                proxy=self.proxies if isinstance(self.proxies, str) else proxy_str,
+            )
+    navigator.Browser.__init__ = _browser_init
+
+    # 2. QuotexAPI: pass proxies to Browser
+    orig_api_init = api_module.QuotexAPI.__init__
+    @functools.wraps(orig_api_init)
+    def _api_init(self, *args, **kwargs):
+        orig_api_init(self, *args, **kwargs)
+        if self.proxies:
+            self.browser = navigator.Browser(proxies=self.proxies)
+            self.browser.set_headers()
+    api_module.QuotexAPI.__init__ = _api_init
+
+    # 3. Login property: forward proxies to Login handler
+    api_module.QuotexAPI.login = property(lambda self: Login(self, proxies=self.proxies))
+
+    # 4. WebSocket connect: use proxy
+    orig_ws_connect = ws_client_module.WebsocketClient._connect_once
+    async def _ws_connect(self, url, extra_headers, ssl):
+        headers = extra_headers or {}
+        ws_proxy = proxy_str if proxy_str.startswith("http") else None
+        async with websockets.connect(
+            url, additional_headers=headers, ssl=ssl,
+            proxy=ws_proxy, ping_interval=24, ping_timeout=20,
+            max_size=2**23, compression=None,
+        ) as ws:
+            self._ws = ws
+            self.api.last_message_at = time.monotonic()
+            await self.api._on_open()
+            self._open_count += 1
+            if self._open_count > 1:
+                asyncio.create_task(self._replay_subscriptions())
+            self._start_watchdog()
+            try:
+                async for raw in ws:
+                    await self.api._on_message(raw)
+            finally:
+                self._stop_watchdog()
+    ws_client_module.WebsocketClient._connect_once = _ws_connect
+
+
 async def get_quotex_connection():
     global _quotex_client
+
+    proxy_str = os.getenv("QUOTEX_PROXY", "").strip()
+    _patch_pyquotex_for_proxy(proxy_str or None)
 
     if _quotex_client is not None:
         try:
@@ -81,6 +146,7 @@ async def get_quotex_connection():
     email = os.getenv("QUOTEX_EMAIL")
     password = os.getenv("QUOTEX_PASSWORD")
     ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    proxies = {"http": proxy_str, "https": proxy_str} if proxy_str else None
 
     client = Quotex(
         email=email,
@@ -88,6 +154,7 @@ async def get_quotex_connection():
         lang="en",
         host="market-qx.trade",
         user_agent=ua,
+        proxies=proxies,
         on_otp_callback=auto_otp_callback
     )
     client.account_is_demo = 0
@@ -98,9 +165,15 @@ async def get_quotex_connection():
         if client.api:
             await client.api.close()
         client.set_session(user_agent=ua, cookies=None, ssid=None)
+        if proxies:
+            client.proxies = proxies
         ok, reason = await client.connect()
         if not ok:
-            logger.error(f"Quotex connection failed after retry: {reason}")
+            if "403" in reason or "Forbidden" in reason:
+                logger.error(
+                    "Cloudflare is blocking the server IP. "
+                    "Set QUOTEX_PROXY in .env to a residential proxy URL."
+                )
             raise ConnectionError(f"Quotex connection failed: {reason}")
 
     _quotex_client = client
