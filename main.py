@@ -11,7 +11,6 @@ import ta
 import imaplib
 import email as email_lib
 import re
-import functools
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -62,43 +61,17 @@ async def auto_otp_callback(message):
 _quotex_client = None
 
 def _patch_pyquotex_for_proxy(proxy_str: str | None):
-    """Monkey-patch pyquotex to route all HTTP + WebSocket traffic through proxy."""
+    """Route pyquotex HTTP + WebSocket traffic through proxy via env vars + WS patch."""
     if not proxy_str:
         return
-    import httpx
     import websockets
-    from pyquotex.network import navigator
-    from pyquotex import api as api_module
     from pyquotex.ws import client as ws_client_module
-    from pyquotex.network.login import Login
 
-    # 1. Browser: make httpx client respect proxy (accept both str and dict)
-    orig_browser_init = navigator.Browser.__init__
-    def _browser_init(self, *args, **kwargs):
-        orig_browser_init(self, *args, **kwargs)
-        if self.proxies:
-            self._client = httpx.AsyncClient(
-                verify=self._ssl_context,
-                timeout=30.0,
-                follow_redirects=True,
-                proxy=self.proxies if isinstance(self.proxies, str) else proxy_str,
-            )
-    navigator.Browser.__init__ = _browser_init
+    # httpx reads HTTP_PROXY / HTTPS_PROXY env vars automatically (trust_env=True)
+    os.environ["HTTP_PROXY"] = proxy_str
+    os.environ["HTTPS_PROXY"] = proxy_str
 
-    # 2. QuotexAPI: pass proxies to Browser
-    orig_api_init = api_module.QuotexAPI.__init__
-    @functools.wraps(orig_api_init)
-    def _api_init(self, *args, **kwargs):
-        orig_api_init(self, *args, **kwargs)
-        if self.proxies:
-            self.browser = navigator.Browser(proxies=self.proxies)
-            self.browser.set_headers()
-    api_module.QuotexAPI.__init__ = _api_init
-
-    # 3. Login property: forward proxies to Login handler
-    api_module.QuotexAPI.login = property(lambda self: Login(self, proxies=self.proxies))
-
-    # 4. WebSocket connect: use proxy
+    # WebSocket doesn't read env vars – patch it explicitly
     orig_ws_connect = ws_client_module.WebsocketClient._connect_once
     async def _ws_connect(self, url, extra_headers, ssl):
         headers = extra_headers or {}
