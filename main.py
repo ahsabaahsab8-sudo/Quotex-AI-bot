@@ -61,35 +61,35 @@ async def auto_otp_callback(message):
 _quotex_client = None
 
 def _patch_pyquotex_for_proxy(proxy_str: str | None):
-    """Route pyquotex HTTP + WebSocket traffic through proxy via env vars + WS patch."""
-    if not proxy_str:
-        return
-    import websockets
-    from pyquotex.ws import client as ws_client_module
+    """Route pyquotex traffic: cloudscraper for HTTP (bypasses CF), direct WS."""
+    import cloudscraper
+    import asyncio
     from pyquotex.network import navigator
+    from pyquotex.ws import client as ws_client_module
+    import websockets
 
-    # httpx reads HTTP_PROXY / HTTPS_PROXY env vars automatically (trust_env=True)
-    os.environ["HTTP_PROXY"] = proxy_str
-    os.environ["HTTPS_PROXY"] = proxy_str
+    # Replace Browser.send_request with cloudscraper (synchronous, bypasses Cloudflare)
+    scraper = cloudscraper.create_scraper(
+        browser={"browser": "chrome", "platform": "windows", "mobile": False}
+    )
+    if proxy_str:
+        scraper.proxies.update({"http": proxy_str, "https": proxy_str})
 
-    # Add browser client-hint headers that Cloudflare requires
-    orig_browser_h = navigator.Browser.get_headers
-    def _get_headers(self):
-        h = orig_browser_h(self)
-        h.update({
-            "sec-ch-ua": '"Google Chrome";v="127", "Chromium";v="127", "Not?A_Brand";v="99"',
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": '"Windows"',
-            "sec-ch-ua-arch": '"x86"',
-            "sec-ch-ua-full-version": '"127.0.6533.120"',
-            "sec-ch-ua-platform-version": '"15.0.0"',
-            "sec-ch-ua-bitness": '"64"',
-        })
-        return h
-    navigator.Browser.get_headers = _get_headers
+    orig_send = navigator.Browser.send_request
+    async def _send_request(self, method, url, headers=None, **kwargs):
+        merged_headers = self.headers or {}
+        if headers:
+            merged_headers.update(headers)
+        resp = await asyncio.to_thread(
+            scraper.request, method, url,
+            headers=merged_headers, **kwargs
+        )
+        self.response = resp
+        return resp
+    navigator.Browser.send_request = _send_request
 
-    # WebSocket doesn't read env vars – patch it explicitly
-    orig_ws_connect = ws_client_module.WebsocketClient._connect_once
+    # WebSocket patch (no proxy needed - WS connects directly from Railway)
+    orig_ws = ws_client_module.WebsocketClient._connect_once
     async def _ws_connect(self, url, extra_headers, ssl):
         headers = extra_headers or {}
         async with websockets.connect(
