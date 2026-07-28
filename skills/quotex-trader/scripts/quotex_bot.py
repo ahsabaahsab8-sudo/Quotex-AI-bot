@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 import logging
+import threading
 from datetime import datetime, timezone, timedelta
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -16,6 +17,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 import main as bot_main
+from quotex_adapter import get_active_pairs as adapter_get_active_pairs, close_quotex_connection
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -26,32 +28,13 @@ if not TOKEN:
     sys.exit(1)
 
 
+def run_session_keeper_in_thread():
+    """Session keeper is now handled by A11ksa adapter — no-op."""
+    pass
+
+
 async def get_active_pairs(client) -> dict:
-    instruments = await client.get_instruments()
-    otc, real, crypto = [], [], []
-    for inst in instruments:
-        code = inst[1]
-        category = inst[3]
-        is_open = inst[14]
-        payout = inst[5]
-        
-        is_otc = "_otc" in code.lower()
-        if is_otc:
-            # Show all active OTC currencies and assets (no is_open/payout restriction)
-            if category == "currency":
-                otc.append((payout, code))
-            elif category in ("crypto", "cryptocurrency", "commodity", "index"):
-                crypto.append((payout, code))
-        else:
-            if not is_open or payout < 70:
-                continue
-            if category == "currency":
-                real.append((payout, code))
-            elif category in ("crypto", "cryptocurrency", "commodity", "index"):
-                crypto.append((payout, code))
-                
-    sort_key = lambda x: (-x[0], x[1])
-    return {"OTC": sorted(otc, key=sort_key), "REAL": sorted(real, key=sort_key), "CRYPTO": sorted(crypto, key=sort_key)}
+    return await adapter_get_active_pairs(client)
 
 
 
@@ -111,7 +94,7 @@ async def menu_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         client = await bot_main.get_quotex_connection()
         pairs_dict = await get_active_pairs(client)
-        await client.close()
+        await close_quotex_connection()
     except Exception as e:
         await query.edit_message_text(f"❌ Failed to connect to Quotex: {e}")
         return
@@ -161,11 +144,11 @@ async def pair_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tech_data = await bot_main.fetch_and_process_indicators(client, pair)
     if tech_data is None:
         await query.edit_message_text(f"❌ Failed to fetch candle data for {display}")
-        await client.close()
+        await close_quotex_connection()
         return
     if tech_data == "LOW_VOLATILITY":
         await query.edit_message_text(f"⚠️ {display} has LOW VOLATILITY right now. Cannot generate a reliable signal. Try again later.")
-        await client.close()
+        await close_quotex_connection()
         return
 
     # Math score the selected pair
@@ -206,7 +189,7 @@ async def pair_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     ai_result = await bot_main.query_all_models(tech_data["summary"], pair_code=pair, original_pair=original_pair if pair != original_pair else None)
-    await client.close()
+    await close_quotex_connection()
 
     if not ai_result or not isinstance(ai_result, dict):
         await query.edit_message_text(f"❌ AI analysis failed for {display}. All AI models may be unavailable.")
@@ -252,7 +235,7 @@ async def pair_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.message.reply_text(signal_text)
 
-    await query.edit_message_text(f"✅ Signal sent for *{display}*!\n\n👉 Check the messages above 👆", parse_mode="Markdown")
+    await query.edit_message_text(f"✅ Signal sent for *{display}*!\n\nCheck the messages above", parse_mode="Markdown")
 
     PKT = timezone(timedelta(hours=5))
     now_pkt = datetime.now(PKT)
@@ -262,23 +245,23 @@ async def pair_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         client = await bot_main.get_quotex_connection()
-        candles_data = await client.get_historical_candles(signal["token"], 180, 60)
-        await client.close()
+        from quotex_adapter import fetch_candles
+        result_candles = await fetch_candles(client, signal["token"], count=180, timeframe=60)
+        await close_quotex_connection()
 
-        if candles_data and len(candles_data) >= 2:
-            c = candles_data[-2] if isinstance(candles_data[-2], list) else (candles_data[-2] if isinstance(candles_data[-2], dict) else None)
-            if c:
-                c_open = float(c[1]) if isinstance(c, list) else float(c["open"])
-                c_close = float(c[2]) if isinstance(c, list) else float(c["close"])
-                went_up = c_close > c_open
-                predicted_up = signal["direction"] == "UP"
-                won = went_up == predicted_up
+        if result_candles and len(result_candles) >= 2:
+            c = result_candles[-2]
+            c_open = float(c["open"])
+            c_close = float(c["close"])
+            went_up = c_close > c_open
+            predicted_up = signal["direction"] == "UP"
+            won = went_up == predicted_up
 
-                if won:
-                    result_msg = f"✅ *Trade WIN* - *{display}*\n\nTrade won sureshot"
-                else:
-                    result_msg = f"❌ *Trade LOSS* - *{display}*\n\nAI already showed why this can loss. You can check the reason. Do not worry. Try for another one."
-                await query.message.reply_text(result_msg, parse_mode="Markdown")
+            if won:
+                result_msg = f"WIN - {display}"
+            else:
+                result_msg = f"LOSS - {display}"
+            await query.message.reply_text(result_msg, parse_mode="Markdown")
     except Exception as e:
         logger.warning(f"Trade result check failed: {e}")
 
@@ -288,8 +271,12 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
+    # Session keeper disabled — kept for reference, uncomment when Quotex WS stabilises
+    # t = threading.Thread(target=run_session_keeper_in_thread, daemon=True)
+    # t.start()
+
     from telegram.request import HTTPXRequest
-    request = HTTPXRequest(httpx_kwargs={"trust_env": False})
+    request = HTTPXRequest(httpx_kwargs={"timeout": 30})
     app = Application.builder().token(TOKEN).request(request).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(get_signal_menu, pattern="^get_signal$"))

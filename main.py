@@ -11,8 +11,17 @@ import ta
 import imaplib
 import email as email_lib
 import re
+from datetime import datetime, timezone, timedelta, time as dt_time
 from dotenv import load_dotenv
 from openai import OpenAI
+
+from quotex_adapter import (
+    get_quotex_connection as adapter_get_quotex_connection,
+    close_quotex_connection,
+    fetch_candles as adapter_fetch_candles,
+    get_active_pairs as adapter_get_active_pairs,
+    get_asset_payout as adapter_get_asset_payout,
+)
 
 load_dotenv()
 
@@ -58,187 +67,17 @@ async def auto_otp_callback(message):
 
 # ─── QUOTEX CONNECTION ───────────────────────────────────────────────
 
-_quotex_client = None
+async def start_session_keeper():
+    logger.info("Session keeper: A11ksa adapter handles auto-refresh natively")
+    pass
 
-
-async def login_via_browser() -> tuple[str, str, str]:
-    """Log into Quotex via headless Chrome to bypass Cloudflare.
-    Returns (cookies_str, ssid_token, user_agent).
-    """
-    from playwright.async_api import async_playwright
-
-    email = os.getenv("QUOTEX_EMAIL")
-    password = os.getenv("QUOTEX_PASSWORD")
-    if not email or not password:
-        raise ConnectionError("QUOTEX_EMAIL or QUOTEX_PASSWORD not set")
-
-    logger.info("Launching headless Chrome to bypass Cloudflare...")
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-gpu",
-            ],
-        )
-        context = await browser.new_context(
-            viewport={"width": 1280, "height": 720},
-            locale="en-US",
-            timezone_id="America/New_York",
-        )
-        page = await context.new_page()
-        await page.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
-        )
-
-        await page.goto(
-            "https://market-qx.trade/en/sign-in/modal/",
-            wait_until="networkidle",
-            timeout=90000,
-        )
-        await page.wait_for_selector(
-            "input[name='email'], input[type='email']", timeout=30000
-        )
-        await page.fill("input[name='email']", email)
-        await page.fill("input[name='password']", password)
-        await page.click("button[type='submit'], input[type='submit']")
-
-        await page.wait_for_timeout(2000)
-        from playwright.async_api import TimeoutError as PlaywrightTimeout
-
-        try:
-            otp_input = page.locator("input[name='code'], input[name='pin']").first
-            if await otp_input.is_visible(timeout=5000):
-                otp = await auto_otp_callback(None)
-                if otp:
-                    await otp_input.fill(otp)
-                    await page.click("button[type='submit'], input[type='submit']")
-                    await page.wait_for_timeout(3000)
-        except (PlaywrightTimeout, Exception):
-            pass
-
-        try:
-            await page.wait_for_url("**/trade**", timeout=30000)
-        except PlaywrightTimeout:
-            await page.goto(
-                "https://market-qx.trade/en/trade",
-                wait_until="networkidle",
-                timeout=30000,
-            )
-
-        cookies = await context.cookies()
-        cookie_str = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
-        ssid = await page.evaluate(
-            "window.settings?.token || window.settings?.ssid || ''"
-        )
-
-        if not ssid:
-            await page.reload(wait_until="networkidle")
-            await page.wait_for_timeout(2000)
-            ssid = await page.evaluate(
-                "window.settings?.token || window.settings?.ssid || ''"
-            )
-
-        user_agent = await page.evaluate("navigator.userAgent")
-        await browser.close()
-
-        if not ssid or not cookie_str:
-            raise ConnectionError("Browser login succeeded but no SSID/cookies found")
-
-        logger.info("Browser login successful")
-        return cookie_str, ssid, user_agent
-
-
-def _patch_pyquotex_ws_only():
-    """Patch only WebSocket connection to ensure it works directly."""
-    from pyquotex.ws import client as ws_client_module
-    import websockets
-
-    orig_ws = ws_client_module.WebsocketClient._connect_once
-    async def _ws_connect(self, url, extra_headers, ssl):
-        headers = extra_headers or {}
-        async with websockets.connect(
-            url, additional_headers=headers, ssl=ssl,
-            ping_interval=24, ping_timeout=20,
-            max_size=2**23, compression=None,
-        ) as ws:
-            self._ws = ws
-            self.api.last_message_at = time.monotonic()
-            await self.api._on_open()
-            self._open_count += 1
-            if self._open_count > 1:
-                asyncio.create_task(self._replay_subscriptions())
-            self._start_watchdog()
-            try:
-                async for raw in ws:
-                    await self.api._on_message(raw)
-            finally:
-                self._stop_watchdog()
-    ws_client_module.WebsocketClient._connect_once = _ws_connect
-
+async def stop_session_keeper():
+    pass
 
 async def get_quotex_connection():
-    global _quotex_client
-
-    _patch_pyquotex_ws_only()
-
-    if _quotex_client is not None:
-        try:
-            check = await _quotex_client.check_connect()
-            if check:
-                return _quotex_client
-        except Exception:
-            pass
-
-    from pyquotex.stable_api import Quotex
-    from pyquotex.network.login import Login
-
-    Login.base_url = "market-qx.trade"
-    Login.https_base_url = "https://market-qx.trade"
-
-    email = os.getenv("QUOTEX_EMAIL")
-    password = os.getenv("QUOTEX_PASSWORD")
-    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-
-    client = Quotex(
-        email=email,
-        password=password,
-        lang="en",
-        host="market-qx.trade",
-        user_agent=ua,
-        on_otp_callback=auto_otp_callback,
-    )
-    client.account_is_demo = 0
-
-    # Try connecting with existing session (may be stale)
-    logger.info("Attempting Quotex connection with existing session...")
-    ok, reason = await client.connect()
-    if ok:
-        _quotex_client = client
-        logger.info("Quotex connected with existing session")
-        return _quotex_client
-
-    logger.warning(f"Session failed ({reason}), clearing and trying browser login...")
-    if client.api:
-        await client.api.close()
-    client.set_session(user_agent=ua, cookies=None, ssid=None)
-
-    logger.info("Launching headless Chrome to bypass Cloudflare and login...")
-    cookie_str, ssid, browser_ua = await login_via_browser()
-    client.set_session(user_agent=browser_ua, cookies=cookie_str, ssid=ssid)
-
-    ok, reason = await client.connect()
-    if not ok:
-        raise ConnectionError(
-            f"Quotex connection failed after browser login: {reason}"
-        )
-
-    _quotex_client = client
-    logger.info("Quotex connected successfully (browser login)")
-    return _quotex_client
+    """Get or create a connected A11ksa AsyncQuotexClient.
+    Replaces the broken pyquotex connection flow."""
+    return await adapter_get_quotex_connection()
 
 
 # ─── INDICATOR CALCULATION ───────────────────────────────────────────
@@ -864,22 +703,16 @@ def detect_candlestick_patterns(df: pd.DataFrame) -> list:
 
 
 async def fetch_and_process_indicators(client, token: str, payout: int = 80):
-    try:
-        candles_data = await client.get_historical_candles(token, 18000, 60)
-    except Exception as e:
-        logger.error(f"Failed to fetch candles for {token}: {e}")
+    candles_data = await adapter_fetch_candles(client, token, count=18000, timeframe=60)
+    if candles_data is None:
+        logger.error(f"Failed to fetch candles for {token}")
         return None
 
-    if not candles_data or len(candles_data) < 30:
-        logger.warning(f"Insufficient candles for {token}: {len(candles_data) if candles_data else 0}")
+    if len(candles_data) < 30:
+        logger.warning(f"Insufficient candles for {token}: {len(candles_data)}")
         return None
 
-    candles = []
-    for c in candles_data:
-        if isinstance(c, list):
-            candles.append({"time": int(c[0]), "open": float(c[1]), "close": float(c[2]), "high": float(c[3]), "low": float(c[4]), "volume": float(c[5]) if len(c) > 5 else 0})
-        elif isinstance(c, dict):
-            candles.append({"time": int(c["time"]), "open": float(c["open"]), "close": float(c["close"]), "high": float(c["high"]), "low": float(c["low"]), "volume": float(c.get("volume", 0))})
+    candles = candles_data
 
     summary = compute_indicators(candles, token=token, payout=payout)
     if summary.get("low_volatility", False):
