@@ -563,12 +563,48 @@ async def _camoufox_login() -> str | None:
         ) as browser:
             page = await browser.new_page()
 
-            logger.info("Camoufox: navigating to sign-in page...")
-            await page.goto(
-                "https://market-qx.trade/en/sign-in/",
-                wait_until="domcontentloaded", timeout=120000
-            )
+            # Block navigation redirect to qxbroker.com but allow sub-resources
+            async def block_qxbroker_nav(route):
+                url = route.request.url
+                if url.startswith("https://qxbroker.com/") and route.request.resource_type == "document":
+                    logger.info("Camoufox: blocked nav redirect to qxbroker.com")
+                    await route.abort()
+                else:
+                    await route.continue_()
+            await page.route("**/*", block_qxbroker_nav)
 
+            logger.info("Camoufox: navigating to sign-in page...")
+            resp = None
+            try:
+                resp = await page.goto(
+                    "https://market-qx.trade/en/sign-in/",
+                    wait_until="domcontentloaded", timeout=120000
+                )
+            except Exception:
+                pass
+
+            final_url = page.url
+            logger.info("Camoufox: URL after nav: %s", final_url)
+
+            # Retry with navigation redirect blocked if we got redirected
+            if "qxbroker.com" in final_url:
+                logger.info("Camoufox: server redirected to qxbroker.com, retrying with redirect blocked...")
+                await page.goto(
+                    "about:blank",
+                    wait_until="domcontentloaded", timeout=10000
+                )
+                await asyncio.sleep(1)
+                try:
+                    await page.goto(
+                        "https://market-qx.trade/en/sign-in/",
+                        wait_until="domcontentloaded", timeout=120000
+                    )
+                except Exception:
+                    pass
+                final_url = page.url
+                logger.info("Camoufox: URL after retry: %s", final_url)
+
+            # Handle Cloudflare if present
             title = await page.title()
             if "Just a moment" in title:
                 logger.info("Camoufox: Cloudflare detected, waiting...")
@@ -613,11 +649,14 @@ async def _camoufox_login() -> str | None:
 
             # Navigate to trade page if not already there
             if "/trade" not in page.url:
-                await page.goto(
-                    "https://market-qx.trade/en/trade",
-                    wait_until="domcontentloaded", timeout=60000
-                )
-                await asyncio.sleep(5)
+                try:
+                    await page.goto(
+                        "https://market-qx.trade/en/trade",
+                        wait_until="domcontentloaded", timeout=60000
+                    )
+                    await asyncio.sleep(5)
+                except Exception:
+                    pass
 
             logger.info("Camoufox: trade URL: %s", page.url)
 
