@@ -361,12 +361,12 @@ async def _kameleo_login() -> str | None:
                             }
                         }
                     } catch(e) {}
-                    try { return document.cookie; } catch(e) {}
+                    try { var s = document.cookie.match(/ssid=([^;]+)/); return s ? s[1] : null; } catch(e) {}
                     return null;
                 }
             """)
             if not token:
-                # Try cookie fallback
+                # Try cookie fallback via Playwright API
                 cookies = await browser.contexts[0].cookies()
                 for c in cookies:
                     if "ssid" in c["name"].lower():
@@ -392,8 +392,274 @@ async def _kameleo_login() -> str | None:
     return token
 
 
+def _is_linux() -> bool:
+    import platform
+    return platform.system() == "Linux"
+
+
+async def _patchright_login() -> str | None:
+    """Login via Patchright (patched Playwright with Cloudflare bypass).
+    Works on Linux (Railway) and Windows."""
+    email = os.getenv("QUOTEX_EMAIL")
+    password = os.getenv("QUOTEX_PASSWORD")
+    if not email or not password:
+        return None
+
+    try:
+        from patchright.async_api import async_playwright
+    except ImportError:
+        logger.error("patchright not installed. Run: pip install patchright && patchright install chromium")
+        return None
+
+    token = None
+    ua = None
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--window-size=1280,720",
+                ]
+            )
+            context = await browser.new_context(
+                viewport={"width": 1280, "height": 720},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+            )
+            page = await context.new_page()
+
+            logger.info("Patchright: navigating to sign-in page...")
+            await page.goto(
+                "https://market-qx.trade/en/sign-in/",
+                wait_until="domcontentloaded", timeout=120000
+            )
+
+            # Handle Cloudflare challenge if present
+            title = await page.title()
+            if "Just a moment" in title:
+                logger.info("Patchright: waiting for Cloudflare challenge...")
+                try:
+                    await page.wait_for_function(
+                        "() => !document.title.includes('Just a moment')",
+                        timeout=120000
+                    )
+                    logger.info("Patchright: Cloudflare passed")
+                except Exception:
+                    logger.warning("Patchright: Cloudflare may still be active, continuing...")
+
+            await asyncio.sleep(3)
+
+            # Fill login form (visible inputs, second set)
+            login_result = await page.evaluate(
+                """
+                (args) => {
+                    var emails = document.querySelectorAll('input[name="email"]');
+                    var passes = document.querySelectorAll('input[name="password"]');
+                    if (!emails.length || !passes.length) return "no inputs found";
+                    var email = emails.length > 1 ? emails[1] : emails[0];
+                    var pass = passes.length > 1 ? passes[1] : passes[0];
+                    email.value = args[0];
+                    pass.value = args[1];
+                    email.dispatchEvent(new Event('input', { bubbles: true }));
+                    pass.dispatchEvent(new Event('input', { bubbles: true }));
+                    var buttons = document.querySelectorAll('button');
+                    for (var i = 0; i < buttons.length; i++) {
+                        var b = buttons[i];
+                        if (b.textContent.trim() === "Sign in" && b.offsetParent !== null) {
+                            b.click();
+                            return "clicked Sign in";
+                        }
+                    }
+                    return "Sign in button not found";
+                }
+                """,
+                [email, password]
+            )
+            logger.info("Patchright: form result: %s", login_result)
+            await asyncio.sleep(7)
+
+            # OTP check
+            if "/sign-in" in page.url.lower():
+                logger.info("Patchright: checking for OTP input...")
+                try:
+                    otp_el = await page.query_selector('input[name="code"], input[name="otp"]')
+                    if otp_el:
+                        otp = await asyncio.to_thread(auto_read_otp_sync, timeout=60)
+                        if otp:
+                            await otp_el.fill(otp)
+                            logger.info("Patchright: OTP submitted")
+                            await asyncio.sleep(5)
+                except Exception:
+                    pass
+
+            # Navigate to trade page
+            await page.goto(
+                "https://market-qx.trade/en/trade",
+                wait_until="domcontentloaded", timeout=60000
+            )
+            await asyncio.sleep(3)
+
+            # Extract token
+            token = await page.evaluate("""
+                () => {
+                    try { if (window.settings && window.settings.token) return window.settings.token; } catch(e) {}
+                    try {
+                        var scripts = document.querySelectorAll('script');
+                        for (var i = 0; i < scripts.length; i++) {
+                            var t = scripts[i].textContent;
+                            if (t.includes('token')) {
+                                var m = t.match(/["']token["']\\s*[:=]\\s*["']([^"']+)["']/);
+                                if (m) return m[1];
+                            }
+                        }
+                    } catch(e) {}
+                    try { var s = document.cookie.match(/ssid=([^;]+)/); return s ? s[1] : null; } catch(e) {}
+                    return null;
+                }
+            """)
+            if not token:
+                cookies = await context.cookies()
+                for c in cookies:
+                    if "ssid" in c["name"].lower():
+                        token = c["value"]
+                        break
+
+            ua = await page.evaluate("navigator.userAgent")
+            logger.info("Patchright: token: %s...%s", token[:8] if token else "None", token[-4:] if token else "")
+
+            await browser.close()
+    except Exception as e:
+        logger.error("Patchright login failed: %s", e)
+
+    if token:
+        save_session(email, token, ua or "")
+    return token
+
+
+async def _camoufox_login() -> str | None:
+    """Login via Camoufox (custom Firefox build with C++ stealth).
+    Works on both Windows and Linux. Bypasses Cloudflare reliably."""
+    email = os.getenv("QUOTEX_EMAIL")
+    password = os.getenv("QUOTEX_PASSWORD")
+    if not email or not password:
+        return None
+
+    try:
+        from camoufox.async_api import AsyncCamoufox
+    except ImportError:
+        logger.error("camoufox not installed. Run: pip install camoufox[geoip] && python -m camoufox fetch")
+        return None
+
+    token = None
+    ua = None
+    try:
+        async with AsyncCamoufox(
+            humanize=True,
+            geoip=True,
+            disable_coop=True,
+            headless=True,
+        ) as browser:
+            page = await browser.new_page()
+
+            logger.info("Camoufox: navigating to sign-in page...")
+            await page.goto(
+                "https://market-qx.trade/en/sign-in/",
+                wait_until="domcontentloaded", timeout=120000
+            )
+
+            title = await page.title()
+            if "Just a moment" in title:
+                logger.info("Camoufox: Cloudflare detected, waiting...")
+                try:
+                    await page.wait_for_function(
+                        "() => !document.title.includes('Just a moment')",
+                        timeout=120000
+                    )
+                    logger.info("Camoufox: Cloudflare passed")
+                except Exception:
+                    logger.warning("Camoufox: Cloudflare still active, continuing...")
+
+            await asyncio.sleep(3)
+
+            # Fill login form (visible inputs, second set)
+            login_result = await page.evaluate(
+                """
+                (args) => {
+                    var emails = document.querySelectorAll('input[name="email"]');
+                    var passes = document.querySelectorAll('input[name="password"]');
+                    var email = emails.length > 1 ? emails[1] : emails[0];
+                    var pass = passes.length > 1 ? passes[1] : passes[0];
+                    email.value = args[0];
+                    pass.value = args[1];
+                    email.dispatchEvent(new Event('input', { bubbles: true }));
+                    pass.dispatchEvent(new Event('input', { bubbles: true }));
+                    var buttons = document.querySelectorAll('button');
+                    for (var i = 0; i < buttons.length; i++) {
+                        var b = buttons[i];
+                        if (b.textContent.trim() === "Sign in" && b.offsetParent !== null) {
+                            b.click();
+                            return "clicked Sign in";
+                        }
+                    }
+                    return "Sign in button not found";
+                }
+                """,
+                [email, password]
+            )
+            logger.info("Camoufox: %s", login_result)
+            await asyncio.sleep(10)
+
+            # Navigate to trade page if not already there
+            if "/trade" not in page.url:
+                await page.goto(
+                    "https://market-qx.trade/en/trade",
+                    wait_until="domcontentloaded", timeout=60000
+                )
+                await asyncio.sleep(5)
+
+            logger.info("Camoufox: trade URL: %s", page.url)
+
+            # Extract token
+            token = await page.evaluate(
+                """
+                () => {
+                    try { if (window.settings && window.settings.token) return window.settings.token; } catch(e) {}
+                    try {
+                        var scripts = document.querySelectorAll('script');
+                        for (var i = 0; i < scripts.length; i++) {
+                            var t = scripts[i].textContent;
+                            if (t && t.includes('token')) {
+                                var m = t.match(/["']token["']\\s*[:=]\\s*["']([^"']+)["']/);
+                                if (m) return m[1];
+                            }
+                        }
+                    } catch(e) {}
+                    try { var s = document.cookie.match(/ssid=([^;]+)/); return s ? s[1] : null; } catch(e) {}
+                    return null;
+                }
+                """
+            )
+            if not token:
+                cookies = await page.context.cookies()
+                for c in cookies:
+                    if "ssid" in c["name"].lower():
+                        token = c["value"]
+                        break
+
+            ua = await page.evaluate("navigator.userAgent")
+            logger.info("Camoufox: token: %s...%s", token[:8] if token else "None", token[-4:] if token else "")
+    except Exception as e:
+        logger.error("Camoufox login failed: %s", e)
+
+    if token:
+        save_session(email, token, ua or "")
+    return token
+
+
 async def renew_ssid(force_playwright: bool = False) -> str | None:
-    """Renew SSID via Kameleo+Playwright, falls back to undetected-chromedriver."""
+    """Renew SSID: Camoufox (primary, cross-platform), Kameleo (Windows), falls back to undetected-chromedriver."""
     email = os.getenv("QUOTEX_EMAIL")
     password = os.getenv("QUOTEX_PASSWORD")
     if not email or not password:
@@ -403,13 +669,25 @@ async def renew_ssid(force_playwright: bool = False) -> str | None:
     last_err = None
     for attempt in range(1, MAX_RETRIES + 1):
         logger.info("SSID renewal attempt %d/%d...", attempt, MAX_RETRIES)
+
+        # Camoufox works on both Windows and Linux
         try:
-            token = await _kameleo_login()
+            token = await _camoufox_login()
             if token:
                 return token
         except Exception as e:
             last_err = e
-            logger.warning("Kameleo attempt %d failed: %s", attempt, e)
+            logger.warning("Camoufox attempt %d failed: %s", attempt, e)
+
+        # Kameleo fallback (Windows only)
+        if not _is_linux():
+            try:
+                token = await _kameleo_login()
+                if token:
+                    return token
+            except Exception as e:
+                last_err = e
+                logger.warning("Kameleo attempt %d failed: %s", attempt, e)
 
         # Fallback to undetected-chromedriver
         try:
