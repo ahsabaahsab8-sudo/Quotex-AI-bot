@@ -1,7 +1,4 @@
-"""Auto-renew SSID via Playwright (headless browser login only).
-
-Proactive watchdog runs every 20 min so the token is always fresh.
-Retries 3 times with backoff. High timeouts (30-60s)."""
+"""Auto-renew SSID via Kameleo+Playwright (bypasses Cloudflare), falls back to undetected-chromedriver."""
 
 import os
 import json
@@ -10,6 +7,10 @@ import logging
 import imaplib
 import email as email_lib
 import re
+import time
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ def load_session() -> dict | None:
 def save_session(email: str, token: str, ua: str = ""):
     try:
         if not ua:
-            ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0"
+            ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         data = {}
         if os.path.exists(SESSION_FILE):
             with open(SESSION_FILE) as f:
@@ -52,11 +53,11 @@ def save_session(email: str, token: str, ua: str = ""):
         logger.error(f"Failed to save session: {e}")
 
 
-async def auto_read_otp(timeout: int = 60) -> str | None:
+def auto_read_otp_sync(timeout: int = 60) -> str | None:
     imap_user = os.getenv("IMAP_EMAIL") or os.getenv("QUOTEX_EMAIL")
     imap_pass = os.getenv("IMAP_PASSWORD")
     if not imap_pass:
-        logger.warning("IMAP_PASSWORD not set, OTP auto-read unavailable")
+        logger.warning("IMAP_PASSWORD not set")
         return None
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
@@ -78,7 +79,7 @@ async def auto_read_otp(timeout: int = 60) -> str | None:
                 match = re.search(r'\b(\d{4,6})\b', text)
                 if match:
                     return match.group(1)
-            await asyncio.sleep(1)
+            time.sleep(1)
         logger.warning(f"OTP not found after {timeout}s")
         return None
     except Exception as e:
@@ -86,223 +87,313 @@ async def auto_read_otp(timeout: int = 60) -> str | None:
         return None
 
 
-async def _wait_cf(context, timeout: int = 60) -> bool:
-    for i in range(timeout):
-        await asyncio.sleep(1)
-        if any(c["name"] == "cf_clearance" for c in await context.cookies()):
-            return True
-    return False
-
-
-async def _ensure_login_page(page, context) -> bool:
-    """Navigate to sign-in page, handle Cloudflare, ensure login form is visible."""
-    for attempt in range(3):
-        logger.info("Playwright: loading sign-in page (attempt %d/3)...", attempt + 1)
-        try:
-            await page.goto("https://market-qx.trade/en/sign-in/", wait_until="commit", timeout=30000)
-        except Exception:
-            pass
-        ok = await _wait_cf(context, 60)
-        if ok:
-            logger.info("Playwright: Cloudflare cleared")
-        else:
-            logger.warning("Playwright: Cloudflare clearance timeout, proceeding anyway...")
-        try:
-            await page.wait_for_load_state("load", timeout=30000)
-        except Exception:
-            pass
-        await asyncio.sleep(3)
-        title = await page.title()
-        if "Just a moment" not in title:
-            logger.info("Playwright: page loaded: %s", title)
-            return True
-        logger.warning("Playwright: still blocked by Cloudflare, retrying...")
-    logger.error("Playwright: failed to load sign-in page after 3 attempts")
-    return False
-
-
-async def _find_login_form(page):
-    """Find login email and password fields using multiple selector strategies."""
-    email_field = None
-    password_field = None
-
-    # Strategy 1: Look for tab structure with #tab-1 (old layout)
-    tab1 = await page.query_selector("#tab-1")
-    if tab1:
-        email_field = await tab1.query_selector('input[name="email"]')
-        password_field = await tab1.query_selector('input[name="password"]')
-        if email_field and password_field:
-            logger.info("Playwright: found login form inside #tab-1")
-            return email_field, password_field
-
-    # Strategy 2: Look for login form specifically (not registration)
-    all_emails = await page.query_selector_all('input[name="email"]')
-    all_passwords = await page.query_selector_all('input[name="password"]')
-
-    # Find the login email (it's usually before the registration one or has no id)
-    for e in all_emails:
-        eid = await e.get_attribute("id") or ""
-        is_visible = await e.is_visible()
-        if is_visible and not eid:
-            email_field = e
-            break
-
-    for p in all_passwords:
-        pid = await p.get_attribute("id") or ""
-        is_visible = await p.is_visible()
-        if is_visible:
-            password_field = p
-            break
-
-    if email_field and password_field:
-        logger.info("Playwright: found login form via field scanning")
-        return email_field, password_field
-
-    # Strategy 3: Grab any visible email/password inputs
-    inputs = await page.query_selector_all("input:not([type='hidden']):not([type='checkbox'])")
-    for inp in inputs:
-        inp_type = await inp.get_attribute("type") or ""
-        name = await inp.get_attribute("name") or ""
-        if inp_type == "email" or name == "email":
-            email_field = inp
-        if inp_type == "password" or name == "password":
-            password_field = inp
-
-    if email_field and password_field:
-        logger.info("Playwright: found form fields via type scan")
-        return email_field, password_field
-
-    logger.error("Playwright: could not find login form fields")
-    return None, None
-
-
-async def _playwright_login() -> str | None:
-    from playwright.async_api import async_playwright
+def _uc_login() -> str | None:
+    """Single undetected-chromedriver login attempt. Returns token or None."""
+    import undetected_chromedriver as uc
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
 
     email = os.getenv("QUOTEX_EMAIL")
     password = os.getenv("QUOTEX_PASSWORD")
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-            ],
-        )
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 720},
-        )
-        page = await context.new_page()
-        await page.add_init_script("Object.defineProperty(navigator, 'webdriver', { get: () => false })")
+    options = uc.ChromeOptions()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1280,720")
+    options.add_argument("--disable-blink-features=AutomationControlled")
 
-        try:
-            if not await _ensure_login_page(page, context):
-                return None
+    driver = None
+    try:
+        driver = uc.Chrome(options=options, version_main=150)
+        wait = WebDriverWait(driver, 30)
 
-            email_el, pass_el = await _find_login_form(page)
-            if not email_el or not pass_el:
-                return None
+        logger.info("UC: navigating to sign-in page...")
+        driver.get("https://market-qx.trade/en/sign-in/")
+        logger.info("UC: page loaded, title: %s", driver.title)
 
-            logger.info("Playwright: filling credentials...")
-            await email_el.fill(email)
-            await pass_el.fill(password)
+        if "Just a moment" in driver.title:
+            logger.info("UC: waiting for Cloudflare challenge...")
+            try:
+                WebDriverWait(driver, 60).until(lambda d: "Just a moment" not in d.title)
+                logger.info("UC: Cloudflare passed")
+            except Exception:
+                logger.warning("UC: Cloudflare may still be active")
 
-            submit = await page.query_selector('button[type="submit"]')
-            if not submit:
-                submit = await page.query_selector(
-                    '#tab-1 button.modal-sign__block-button, '
-                    'button:has-text("Log in"), button:has-text("Sign in"), '
-                    'button:has-text("Login")'
+        time.sleep(3)
+
+        email_input = driver.find_element(By.CSS_SELECTOR, 'input[name="email"]')
+        password_input = driver.find_element(By.CSS_SELECTOR, 'input[name="password"]')
+        email_input.send_keys(email)
+        password_input.send_keys(password)
+        logger.info("UC: credentials filled")
+
+        submit = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
+        submit.click()
+        logger.info("UC: submitted login form")
+        time.sleep(4)
+
+        if "/trade" not in driver.current_url:
+            logger.info("UC: looking for OTP input...")
+            try:
+                otp_input = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="code"], input[name="otp"]'))
                 )
-            if submit:
-                await submit.click()
-                logger.info("Playwright: clicked submit button")
-            else:
-                await pass_el.press("Enter")
-                logger.info("Playwright: pressed Enter")
+                otp = auto_read_otp_sync(timeout=60)
+                if otp:
+                    otp_input.send_keys(otp)
+                    logger.info("UC: OTP submitted")
+                    time.sleep(3)
+                else:
+                    logger.warning("UC: OTP not available, waiting...")
+                    time.sleep(30)
+            except Exception:
+                logger.warning("UC: no OTP input found, waiting for redirect...")
+                time.sleep(10)
 
+        if "/trade" not in driver.current_url:
+            logger.info("UC: navigating to trade page...")
+            driver.get("https://market-qx.trade/en/trade")
+            time.sleep(3)
+
+        logger.info("UC: extracting token...")
+        token = driver.execute_script("""
+            try {
+                if (window.settings && window.settings.token) return window.settings.token;
+                var scripts = document.querySelectorAll('script');
+                for (var i = 0; i < scripts.length; i++) {
+                    var t = scripts[i].textContent;
+                    if (t.includes('token')) {
+                        var m = t.match(/["']token["']\\s*[:=]\\s*["']([^"']+)["']/);
+                        if (m) return m[1];
+                    }
+                }
+                return null;
+            } catch(e) { return null; }
+        """)
+        if not token:
+            token = driver.execute_script(
+                "try { var s = document.cookie.match(/ssid=([^;]+)/); return s ? s[1] : null; } catch(e) { return null; }"
+            )
+            if token:
+                logger.info("UC: token from cookie")
+
+        if token:
+            ua = driver.execute_script("return navigator.userAgent")
+            save_session(email, token, ua)
+            logger.info("UC: token: %s...%s", token[:8], token[-4:])
+            return token
+
+        logger.error("UC: could not extract token")
+        return None
+
+    except Exception as e:
+        logger.error("UC: login failed: %s", e)
+        return None
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+
+KAMELEO_ENGINE_PATH = os.path.join(
+    os.environ.get("LOCALAPPDATA", ""),
+    "Programs", "Kameleo", "Kameleo.Engine.exe"
+)
+KAMELEO_ENDPOINT = "http://localhost:5050"
+
+
+def _ensure_kameleo_engine():
+    """Start Kameleo engine if not already running."""
+    import subprocess
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.connect(("127.0.0.1", 5050))
+        s.close()
+        logger.info("Kameleo engine already running on port 5050")
+        return True
+    except ConnectionRefusedError:
+        pass
+    finally:
+        s.close()
+    if not os.path.exists(KAMELEO_ENGINE_PATH):
+        logger.error("Kameleo engine not found at %s", KAMELEO_ENGINE_PATH)
+        return False
+    logger.info("Starting Kameleo engine...")
+    try:
+        subprocess.Popen(
+            [KAMELEO_ENGINE_PATH],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        for i in range(15):
+            time.sleep(1)
+            s2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s2.connect(("127.0.0.1", 5050))
+                s2.close()
+                logger.info("Kameleo engine started")
+                return True
+            except ConnectionRefusedError:
+                pass
+            finally:
+                s2.close()
+        logger.error("Kameleo engine did not start within 15s")
+        return False
+    except Exception as e:
+        logger.error("Failed to start Kameleo engine: %s", e)
+        return False
+
+
+async def _kameleo_login() -> str | None:
+    """Login via Kameleo+Playwright. Returns token or None."""
+    email = os.getenv("QUOTEX_EMAIL")
+    password = os.getenv("QUOTEX_PASSWORD")
+    if not email or not password:
+        return False
+
+    if not _ensure_kameleo_engine():
+        return None
+
+    try:
+        from kameleo.local_api_client import KameleoLocalApiClient
+        from kameleo.local_api_client.models.create_profile_request import CreateProfileRequest
+        from playwright.async_api import async_playwright
+    except ImportError:
+        logger.error("kameleo.local_api_client or playwright not installed")
+        return None
+
+    client = KameleoLocalApiClient(endpoint=KAMELEO_ENDPOINT)
+    try:
+        fingerprints = client.fingerprint.search_fingerprints("desktop", None, "chrome")
+        if not fingerprints:
+            logger.error("No Kameleo fingerprints available")
+            return None
+        profile = client.profile.create_profile(CreateProfileRequest(fingerprint_id=fingerprints[0].id))
+        logger.info("Kameleo profile: %s", profile.id)
+    except Exception as e:
+        logger.error("Kameleo profile creation failed: %s", e)
+        return None
+
+    token = None
+    ua = None
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.connect_over_cdp(
+                f"ws://localhost:5050/playwright/{profile.id}"
+            )
+            page = await browser.contexts[0].new_page()
+
+            logger.info("Navigating to sign-in page...")
+            await page.goto(
+                "https://market-qx.trade/en/sign-in/",
+                wait_until="domcontentloaded", timeout=60000
+            )
             await asyncio.sleep(3)
 
-            if "/trade" not in page.url:
-                logger.info("Playwright: looking for OTP input...")
-                otp_el = None
-                for sel in [
-                    'input[name="code"]', 'input[name="otp"]',
-                    'input[placeholder*="code" i]', 'input[autocomplete="one-time-code"]',
-                ]:
-                    otp_el = await page.query_selector(sel)
-                    if otp_el:
-                        break
-                if otp_el:
-                    otp = await auto_read_otp(timeout=60)
-                    if otp:
-                        await otp_el.fill(otp)
-                        await otp_el.press("Enter")
-                        logger.info("Playwright: OTP submitted")
-                    else:
-                        logger.warning("Playwright: OTP auto-read failed, waiting for redirect...")
-                        for _ in range(120):
-                            await asyncio.sleep(1)
-                            if "/trade" in page.url:
-                                break
-                else:
-                    logger.warning("Playwright: no OTP input found, waiting for redirect...")
-                    for _ in range(30):
-                        await asyncio.sleep(1)
-                        if "/trade" in page.url:
-                            break
+            # Fill login form (visible inputs, second set)
+            login_result = await page.evaluate(
+                """
+                (args) => {
+                    var emails = document.querySelectorAll('input[name="email"]');
+                    var passes = document.querySelectorAll('input[name="password"]');
+                    if (!emails.length || !passes.length) return "no inputs found";
+                    var email = emails.length > 1 ? emails[1] : emails[0];
+                    var pass = passes.length > 1 ? passes[1] : passes[0];
+                    email.value = args[0];
+                    pass.value = args[1];
+                    email.dispatchEvent(new Event('input', { bubbles: true }));
+                    pass.dispatchEvent(new Event('input', { bubbles: true }));
+                    var buttons = document.querySelectorAll('button');
+                    for (var i = 0; i < buttons.length; i++) {
+                        var b = buttons[i];
+                        if (b.textContent.trim() === "Sign in" && b.offsetParent !== null) {
+                            b.click();
+                            return "clicked Sign in";
+                        }
+                    }
+                    return "Sign in button not found";
+                }
+                """,
+                [email, password]
+            )
+            logger.info("Login form: %s", login_result)
+            await asyncio.sleep(7)
 
-            if "/trade" not in page.url:
-                logger.info("Playwright: navigating to trade page...")
+            # If still on sign-in page, check for OTP
+            if "/sign-in" in page.url.lower():
+                logger.info("Checking for OTP input...")
                 try:
-                    await page.goto("https://market-qx.trade/en/trade", wait_until="load", timeout=45000)
+                    otp_el = await page.query_selector('input[name="code"], input[name="otp"]')
+                    if otp_el:
+                        otp = await asyncio.to_thread(auto_read_otp_sync, timeout=60)
+                        if otp:
+                            await otp_el.fill(otp)
+                            logger.info("OTP submitted")
+                            await asyncio.sleep(5)
                 except Exception:
                     pass
-                await asyncio.sleep(3)
 
-            logger.info("Playwright: extracting token...")
+            # Navigate to trade page
+            await page.goto(
+                "https://market-qx.trade/en/trade",
+                wait_until="domcontentloaded", timeout=60000
+            )
+            await asyncio.sleep(3)
+
+            # Extract token
             token = await page.evaluate("""
                 () => {
+                    try { if (window.settings && window.settings.token) return window.settings.token; } catch(e) {}
                     try {
-                        if (window.settings && window.settings.token)
-                            return window.settings.token;
-                        const scripts = document.querySelectorAll('script');
-                        for (const s of scripts) {
-                            const t = s.textContent;
+                        var scripts = document.querySelectorAll('script');
+                        for (var i = 0; i < scripts.length; i++) {
+                            var t = scripts[i].textContent;
                             if (t.includes('token')) {
-                                const m = t.match(/["']token["']\\s*[:=]\\s*["']([^"']+)["']/);
+                                var m = t.match(/["']token["']\\s*[:=]\\s*["']([^"']+)["']/);
                                 if (m) return m[1];
                             }
                         }
-                        return null;
-                    } catch(e) { return null; }
+                    } catch(e) {}
+                    try { return document.cookie; } catch(e) {}
+                    return null;
                 }
             """)
             if not token:
-                token = await page.evaluate(
-                    "() => { try { var s = document.cookie.match(/ssid=([^;]+)/); return s ? s[1] : null; } catch(e) { return null; } }"
-                )
-                if token:
-                    logger.info("Playwright: token from cookie")
-            if not token:
-                logger.error("Playwright: could not extract token")
-                return None
+                # Try cookie fallback
+                cookies = await browser.contexts[0].cookies()
+                for c in cookies:
+                    if "ssid" in c["name"].lower():
+                        token = c["value"]
+                        break
 
-            cookies_str = "; ".join(f"{c['name']}={c['value']}" for c in await context.cookies())
             ua = await page.evaluate("navigator.userAgent")
-            save_session(email, token, ua)
-            logger.info("Playwright: token: %s...%s", token[:8], token[-4:])
-            return token
-        finally:
-            await browser.close()
+            logger.info("Token extracted: %s...%s", token[:8] if token else "None", token[-4:] if token else "")
+    except Exception as e:
+        logger.error("Kameleo login failed: %s", e)
+    finally:
+        try:
+            client.profile.stop_profile(profile.id)
+        except Exception:
+            pass
+        try:
+            client.profile.delete_profile(profile.id)
+        except Exception:
+            pass
+
+    if token:
+        save_session(email, token, ua or "")
+    return token
 
 
-async def renew_ssid(force_playwright: bool = True) -> str | None:
-    """Renew SSID via Playwright with retries."""
+async def renew_ssid(force_playwright: bool = False) -> str | None:
+    """Renew SSID via Kameleo+Playwright, falls back to undetected-chromedriver."""
     email = os.getenv("QUOTEX_EMAIL")
     password = os.getenv("QUOTEX_PASSWORD")
     if not email or not password:
@@ -313,12 +404,22 @@ async def renew_ssid(force_playwright: bool = True) -> str | None:
     for attempt in range(1, MAX_RETRIES + 1):
         logger.info("SSID renewal attempt %d/%d...", attempt, MAX_RETRIES)
         try:
-            token = await _playwright_login()
+            token = await _kameleo_login()
             if token:
                 return token
         except Exception as e:
             last_err = e
-            logger.warning("Attempt %d failed: %s", attempt, e)
+            logger.warning("Kameleo attempt %d failed: %s", attempt, e)
+
+        # Fallback to undetected-chromedriver
+        try:
+            token = await asyncio.to_thread(_uc_login)
+            if token:
+                return token
+        except Exception as e:
+            last_err = e
+            logger.warning("UC fallback attempt %d failed: %s", attempt, e)
+
         if attempt < MAX_RETRIES:
             wait = attempt * 10
             logger.info("Retrying in %ds...", wait)
@@ -329,7 +430,7 @@ async def renew_ssid(force_playwright: bool = True) -> str | None:
 
 
 async def renew_ssid_playwright(headless: bool = True) -> str | None:
-    return await renew_ssid(force_playwright=True)
+    return await renew_ssid()
 
 
 if __name__ == "__main__":
