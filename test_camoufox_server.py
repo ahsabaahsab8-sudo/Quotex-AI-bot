@@ -128,7 +128,8 @@ async def main():
 
         cookies = await page.context.cookies()
         ssid_cookies = [c for c in cookies if 'ssid' in c['name'].lower()]
-        print(f"\n   SSID cookies: {[f'{c[\"name\"]}={c[\"value\"][:15]}...' for c in ssid_cookies]}")
+        for c in ssid_cookies:
+            print(f"   SSID cookie: {c['name']}={c['value'][:15]}...")
         print(f"   Total cookies: {len(cookies)}")
 
 
