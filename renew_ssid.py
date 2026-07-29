@@ -555,18 +555,26 @@ async def _camoufox_login() -> str | None:
     token = None
     ua = None
     try:
+        # Optional proxy from env var: CAMOUFOX_PROXY="http://user:pass@ip:port"
+        proxy_cfg = None
+        proxy_env = os.getenv("CAMOUFOX_PROXY")
+        if proxy_env:
+            proxy_cfg = {"server": proxy_env}
+            logger.info("Camoufox: using proxy from CAMOUFOX_PROXY")
+
         async with AsyncCamoufox(
             humanize=True,
             geoip=True,
             disable_coop=True,
             headless=True,
+            proxy=proxy_cfg,
         ) as browser:
             page = await browser.new_page()
 
             # Block navigation redirect to qxbroker.com but allow sub-resources
             async def block_qxbroker_nav(route):
                 url = route.request.url
-                if url.startswith("https://qxbroker.com/") and route.request.resource_type == "document":
+                if "qxbroker.com" in url and route.request.resource_type == "document":
                     logger.info("Camoufox: blocked nav redirect to qxbroker.com")
                     await route.abort()
                 else:
