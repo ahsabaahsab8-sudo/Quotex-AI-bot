@@ -270,11 +270,28 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Update {update} caused error {context.error}")
 
 
-def main():
-    # Session keeper disabled — kept for reference, uncomment when Quotex WS stabilises
-    # t = threading.Thread(target=run_session_keeper_in_thread, daemon=True)
-    # t.start()
+async def ensure_initial_token():
+    """Get a fresh token on startup and start the proactive watchdog."""
+    try:
+        from quotex_adapter import get_quotex_connection, close_quotex_connection, start_watchdog
+        logger.info("Proactive token refresh: connecting on startup...")
+        client = await get_quotex_connection()
+        await close_quotex_connection()
+        logger.info("Proactive token refresh: initial token obtained, watchdog started")
+    except Exception as e:
+        logger.warning(f"Initial token fetch failed (will retry on first signal): {e}")
+        from quotex_adapter import start_watchdog
+        start_watchdog()
 
+
+def main():
+    # Ensure asyncio event loop compatibility on Python 3.14+ Windows
+    if sys.platform == "win32":
+        try:
+            asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
     from telegram.request import HTTPXRequest
     request = HTTPXRequest(httpx_kwargs={"timeout": 30})
     app = Application.builder().token(TOKEN).request(request).build()
@@ -284,9 +301,13 @@ def main():
     app.add_handler(CallbackQueryHandler(pair_selected, pattern="^pair_"))
     app.add_handler(CallbackQueryHandler(back_start, pattern="^back_start$"))
     app.add_error_handler(error_handler)
+
+    # Token refresh deferred (Playwright login hangs on Python 3.14; connects on-demand)
+    # asyncio.get_event_loop().create_task(ensure_initial_token())
+
     logger.info("Bot started. Waiting for Telegram commands...")
     app.run_polling(allowed_updates=Update.ALL_TYPES, timeout=0)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

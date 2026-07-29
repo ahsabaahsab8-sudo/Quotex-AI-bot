@@ -1,14 +1,20 @@
-"""Adapter using pyquotex with real SSID from browser session.
+"""Adapter using pyquotex with auto-renewing SSID.
 
-Auto-renews expired SSID via Playwright headless login + IMAP OTP."""
+Primary renewal: API-based (fast, no browser).
+Fallback: Playwright headless login + IMAP OTP.
+Proactive watchdog refreshes token every 20 min before expiry."""
 
-import os, json, asyncio, logging
-from typing import Optional
+import os
+import json
+import asyncio
+import logging
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-_client: Optional['Quotex'] = None
+_client = None
+_watchdog_task = None
+TOKEN_REFRESH_INTERVAL = 1200  # 20 minutes
 
 
 class SimpleCandle:
@@ -56,8 +62,45 @@ async def _connect_with_token(email, token, session):
     if not ok:
         await client.close()
         return None, msg
-    await client.api.event_registry.wait_event("instruments_ready", timeout=15)
+    await client.api.event_registry.wait_event("instruments_ready", timeout=30)
     return client, None
+
+
+async def _renew_token() -> str | None:
+    """Renew SSID — tries API first, falls back to Playwright."""
+    from renew_ssid import renew_ssid
+    return await renew_ssid(force_playwright=False)
+
+
+async def _watchdog_loop():
+    """Proactively refresh the SSID every TOKEN_REFRESH_INTERVAL seconds
+    so the token never expires between signal requests."""
+    while True:
+        await asyncio.sleep(TOKEN_REFRESH_INTERVAL)
+        logger.info("Watchdog: proactively refreshing SSID...")
+        try:
+            new_token = await _renew_token()
+            if new_token:
+                logger.info("Watchdog: SSID refreshed successfully")
+            else:
+                logger.warning("Watchdog: SSID refresh failed, will retry next cycle")
+        except Exception as e:
+            logger.error(f"Watchdog: SSID refresh error: {e}")
+
+
+def start_watchdog():
+    global _watchdog_task
+    if _watchdog_task is None or _watchdog_task.done():
+        _watchdog_task = asyncio.create_task(_watchdog_loop())
+        logger.info("Token watchdog started (refresh every %ds)", TOKEN_REFRESH_INTERVAL)
+
+
+def stop_watchdog():
+    global _watchdog_task
+    if _watchdog_task and not _watchdog_task.done():
+        _watchdog_task.cancel()
+        _watchdog_task = None
+        logger.info("Token watchdog stopped")
 
 
 async def get_quotex_connection():
@@ -83,26 +126,24 @@ async def get_quotex_connection():
     session = load_session()
     token = session.get("token") if session else None
 
-    # First attempt with existing token
     if token:
         _client, err = await _connect_with_token(email, token, session)
         if _client:
             logger.info("Quotex connected via existing SSID")
+            start_watchdog()
             return _client
         logger.warning("SSID expired or invalid, attempting auto-renew...")
 
-    # Auto-renew SSID via Playwright
-    logger.info("Auto-renewing SSID via Playwright headless login...")
+    logger.info("Auto-renewing SSID...")
     try:
-        from renew_ssid import renew_ssid_playwright
-        new_token = await renew_ssid_playwright(headless=True)
+        new_token = await _renew_token()
     except Exception as e:
         logger.error("SSID renewal process failed: %s", e)
         new_token = None
 
     if not new_token:
-        raise ConnectionError("Auto-renew failed. Set IMAP_PASSWORD in .env for auto-OTP, "
-                              "or manually run: python playwright_login_otp.py --headed")
+        raise ConnectionError("Auto-renew failed. Ensure QUOTEX_EMAIL / QUOTEX_PASSWORD / IMAP_PASSWORD "
+                              "are set in .env")
 
     session = load_session()
     _client, err = await _connect_with_token(email, new_token, session)
@@ -110,6 +151,7 @@ async def get_quotex_connection():
         raise ConnectionError(f"pyquotex connect failed after renewal: {err}")
 
     logger.info("Quotex connected via fresh SSID (auto-renewed)")
+    start_watchdog()
     return _client
 
 
@@ -130,7 +172,7 @@ async def fetch_candles(client, token: str, count: int = 18000, timeframe: int =
             asset=token,
             amount_of_seconds=amount,
             period=timeframe,
-            timeout=15,
+            timeout=30,
             max_workers=3,
         )
         if not candles:
@@ -144,7 +186,6 @@ async def fetch_candles(client, token: str, count: int = 18000, timeframe: int =
 
 
 async def _get_instruments(client) -> list:
-    """Get raw instruments list from pyquotex client."""
     instruments = await client.get_instruments()
     if not instruments:
         return []
@@ -156,7 +197,6 @@ async def _get_instruments(client) -> list:
 
 
 def _get_sym(item) -> tuple[str, int, str]:
-    """Extract (symbol, payout, type) from list or dict instrument."""
     if isinstance(item, dict):
         name = str(item.get('name', ''))
         payout_raw = item.get('profit', {})
