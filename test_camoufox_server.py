@@ -1,7 +1,6 @@
 """Test Camoufox token extraction on Railway server."""
 import asyncio
 import os
-import sys
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -14,18 +13,23 @@ async def main():
         humanize=True,
         geoip=True,
         headless=True,
+        disable_coop=True,
     ) as browser:
         page = await browser.new_page()
 
-        print("Navigating to sign-in...")
+        print("1. Navigate to sign-in...")
         await page.goto(
             "https://market-qx.trade/en/sign-in/",
             wait_until="domcontentloaded",
             timeout=120000
         )
-        await asyncio.sleep(3)
+        print("   Title:", await page.title())
 
-        # Fill login form
+        # Wait for page to fully stabilize
+        await asyncio.sleep(5)
+
+        # Fill and submit login
+        print("2. Fill login form...")
         r = await page.evaluate(
             """(args) => {
                 var e = document.querySelectorAll('input[name="email"]');
@@ -48,21 +52,40 @@ async def main():
             }""",
             [os.getenv("QUOTEX_EMAIL"), os.getenv("QUOTEX_PASSWORD")]
         )
-        print("Login:", r)
-        await asyncio.sleep(10)
-        print("URL:", page.url)
+        print("   Login:", r)
 
-        if "/trade" not in page.url:
-            await page.goto(
-                "https://market-qx.trade/en/trade",
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+        # Wait for navigation/redirect loop
+        for i in range(30):
+            await asyncio.sleep(2)
+            current = page.url
+            print(f"   [{i*2+2}s] {current}")
+            title = await page.title()
+            if "trade" in current.lower() or "Live trading" in title:
+                print("   -> ON TRADE PAGE!")
+                break
+            if "/sign-in" not in current.lower() and "login" not in current.lower():
+                # Maybe we landed somewhere else - try /trade
+                print(f"   -> Landed on: {current}, trying /trade...")
+                await page.goto("https://market-qx.trade/en/trade",
+                                wait_until="domcontentloaded", timeout=30000)
+                await asyncio.sleep(5)
+                if "trade" in page.url.lower():
+                    break
+
+        # If we are on qxbroker.com, try navigating to trade
+        if "qxbroker.com" in page.url and "/trade" not in page.url:
+            print("3. On qxbroker.com, navigating to market-qx.trade/trade...")
+            await page.goto("https://market-qx.trade/en/trade",
+                            wait_until="domcontentloaded", timeout=30000)
             await asyncio.sleep(5)
 
-        token = await page.evaluate(
-            """() => {
-                try { if (window.settings && window.settings.token) return window.settings.token; } catch(e) {}
+        print(f"4. Final URL: {page.url}")
+        print(f"   Title: {await page.title()}")
+
+        # Extract token
+        token = await page.evaluate("() => { try { return window.settings && window.settings.token ? window.settings.token : null; } catch(e) { return null; } }")
+        if not token:
+            token = await page.evaluate("""() => {
                 try {
                     var s = document.querySelectorAll('script');
                     for (var i = 0; i < s.length; i++) {
@@ -73,23 +96,24 @@ async def main():
                         }
                     }
                 } catch(e) {}
-                try { var c = document.cookie.match(/ssid=([^;]+)/); return c ? c[1] : null; } catch(e) {}
                 return null;
-            }"""
-        )
+            }""")
+        if not token:
+            token = await page.evaluate("() => { try { var c = document.cookie.match(/ssid=([^;]+)/); return c ? c[1] : null; } catch(e) { return null; } }")
+        if not token:
+            cookies = await page.context.cookies()
+            for c in cookies:
+                if "ssid" in c["name"].lower():
+                    token = c["value"]
+                    break
 
         if token:
-            print("TOKEN:", token[:12] + "..." + token[-4:])
+            print(f"5. TOKEN: {token[:12]}...{token[-4:]}")
         else:
-            print("FAILED: no token extracted")
-            info = await page.evaluate("""() => {
-                return {
-                    settings: window.settings ? 'exists' : 'undefined',
-                    cookies: document.cookie ?
-                        document.cookie.split(';').map(c=>c.trim().split('=')[0]).join(',') : 'none'
-                };
-            }""")
-            print("Debug:", info)
+            print("5. FAILED: no token")
+            important_cookies = [(c['name'], c['value'][:20]) for c in await page.context.cookies()
+                                 if any(k in c['name'].lower() for k in ['ssid', 'token', 'session', 'cf'])]
+            print(f"   Important cookies: {important_cookies}")
 
 
 asyncio.run(main())
