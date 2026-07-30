@@ -555,9 +555,9 @@ async def _camoufox_login() -> str | None:
     token = None
     ua = None
     try:
-        # Optional proxy from env var: QUOTEX_PROXY or CAMOUFOX_PROXY
+        # Optional proxy from env var: TELEGRAM_PROXY, QUOTEX_PROXY, or CAMOUFOX_PROXY
         proxy_cfg = None
-        proxy_env = os.getenv("QUOTEX_PROXY") or os.getenv("CAMOUFOX_PROXY")
+        proxy_env = os.getenv("TELEGRAM_PROXY") or os.getenv("QUOTEX_PROXY") or os.getenv("CAMOUFOX_PROXY")
         if proxy_env:
             proxy_cfg = {"server": proxy_env}
             logger.info("Camoufox: using proxy from env")
