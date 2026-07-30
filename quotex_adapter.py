@@ -47,6 +47,8 @@ async def _connect_with_token(email, token, session):
     from pyquotex.stable_api import Quotex
     proxy_str = os.getenv("TELEGRAM_PROXY") or os.getenv("QUOTEX_PROXY")
     proxies = {"http": proxy_str, "https": proxy_str} if proxy_str else None
+    if proxy_str:
+        logger.info("pyquotex: using proxy %s", proxy_str)
     client = Quotex(
         email=email,
         password='not-needed',
