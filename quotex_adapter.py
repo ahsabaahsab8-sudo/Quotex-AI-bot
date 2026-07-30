@@ -45,12 +45,15 @@ def load_session() -> dict | None:
 
 async def _connect_with_token(email, token, session):
     from pyquotex.stable_api import Quotex
+    proxy_str = os.getenv("QUOTEX_PROXY")
+    proxies = {"http": proxy_str, "https": proxy_str} if proxy_str else None
     client = Quotex(
         email=email,
         password='not-needed',
         host='market-quotex.pro',
         lang='en',
         wss_url_override='wss://ws2.qxbroker.com/socket.io/?EIO=3&transport=websocket',
+        proxies=proxies,
     )
     client.set_account_mode("REAL")
     client.set_session(
