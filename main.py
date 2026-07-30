@@ -75,8 +75,7 @@ async def stop_session_keeper():
     pass
 
 async def get_quotex_connection():
-    """Get or create a connected A11ksa AsyncQuotexClient.
-    Replaces the broken pyquotex connection flow."""
+    """Get connected pyquotex client via proxy — handles auto-reconnect."""
     return await adapter_get_quotex_connection()
 
 

@@ -293,7 +293,14 @@ def main():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
     from telegram.request import HTTPXRequest
-    request = HTTPXRequest(httpx_kwargs={"timeout": 30})
+    proxy_url = os.getenv("TELEGRAM_PROXY")
+    req_kwargs = {"httpx_kwargs": {"timeout": 30}}
+    if proxy_url:
+        logger.info(f"Using proxy: {proxy_url}")
+        req_kwargs["proxy"] = proxy_url
+        req_kwargs["connect_timeout"] = 15.0
+        req_kwargs["read_timeout"] = 15.0
+    request = HTTPXRequest(**req_kwargs)
     app = Application.builder().token(TOKEN).request(request).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(get_signal_menu, pattern="^get_signal$"))
