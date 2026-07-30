@@ -555,12 +555,12 @@ async def _camoufox_login() -> str | None:
     token = None
     ua = None
     try:
-        # Optional proxy from env var: CAMOUFOX_PROXY="http://user:pass@ip:port"
+        # Optional proxy from env var: QUOTEX_PROXY or CAMOUFOX_PROXY
         proxy_cfg = None
-        proxy_env = os.getenv("CAMOUFOX_PROXY")
+        proxy_env = os.getenv("QUOTEX_PROXY") or os.getenv("CAMOUFOX_PROXY")
         if proxy_env:
             proxy_cfg = {"server": proxy_env}
-            logger.info("Camoufox: using proxy from CAMOUFOX_PROXY")
+            logger.info("Camoufox: using proxy from env")
 
         async with AsyncCamoufox(
             humanize=True,
