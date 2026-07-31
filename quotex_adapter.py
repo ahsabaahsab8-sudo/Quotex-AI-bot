@@ -89,6 +89,11 @@ def _install_proxy_patch(proxy_str: str) -> None:
 
     import httpx
     import websockets
+    if int(websockets.__version__.split(".")[0]) < 13:
+        raise ConnectionError(
+            "pyquotex proxy patch requires websockets>=13 "
+            f"(found {websockets.__version__}). Run: pip install -U websockets"
+        )
     import pyquotex.api as api_mod
     import pyquotex.network.navigator as nav_mod
     from pyquotex.network.navigator import Browser as _OrigBrowser
