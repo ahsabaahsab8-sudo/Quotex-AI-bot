@@ -1095,6 +1095,14 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = "gemini-3.6-flash"
 
 
+def _coerce_dict(data):
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, list) and len(data) == 1 and isinstance(data[0], dict):
+        return data[0]
+    return None
+
+
 async def query_gemini_analysis(tech_data: dict) -> dict | None:
     if not GEMINI_API_KEY:
         logger.error("GEMINI_API_KEY not set")
@@ -1108,7 +1116,7 @@ async def query_gemini_analysis(tech_data: dict) -> dict | None:
         if resp.status_code == 200:
             text = resp.json()['candidates'][0]['content']['parts'][0]['text'].strip()
             text = text.replace("```json", "").replace("```", "").strip()
-            return json.loads(text)
+            return _coerce_dict(json.loads(text))
         logger.error(f"Gemini error {resp.status_code}")
         return None
     except Exception as e:
@@ -1149,7 +1157,7 @@ async def query_step_analysis(tech_data: dict, retries: int = 2) -> dict | None:
                     continue
                 return None
             text = text.replace("```json", "").replace("```", "").strip()
-            return json.loads(text)
+            return _coerce_dict(json.loads(text))
         except json.JSONDecodeError as e:
             logger.warning(f"Step attempt {attempt+1}: JSON error ({e}), retrying...")
             if attempt < retries:
@@ -1187,7 +1195,7 @@ async def query_glm_analysis(tech_data: dict) -> dict | None:
         )
         text = completion.choices[0].message.content.strip()
         text = text.replace("```json", "").replace("```", "").strip()
-        return json.loads(text)
+        return _coerce_dict(json.loads(text))
     except Exception as e:
         logger.error(f"GLM failed: {e}")
         return None
@@ -1272,7 +1280,7 @@ async def query_claude_analysis(tech_data: dict, retries: int = 2) -> dict | Non
                     escape = False
                     cleaned_chars.append(char)
             text = "".join(cleaned_chars)
-            return json.loads(text)
+            return _coerce_dict(json.loads(text))
         except json.JSONDecodeError as e:
             logger.warning(f"Claude attempt {attempt+1}: JSON decode error ({e}), retrying...")
             if attempt < retries:
@@ -1316,7 +1324,7 @@ async def query_deepseek_vote(tech_data: dict, retries: int = 2) -> dict | None:
                     await asyncio.sleep(1)
                     continue
                 return None
-            return json.loads(text)
+            return _coerce_dict(json.loads(text))
         except json.JSONDecodeError as e:
             logger.warning(f"DeepSeek vote attempt {attempt+1}: JSON error ({e}), retrying...")
             if attempt < retries:
@@ -1354,7 +1362,7 @@ async def query_deepseek_analysis_old(tech_data: dict, retries: int = 2) -> dict
                     await asyncio.sleep(1)
                     continue
                 return None
-            return json.loads(text)
+            return _coerce_dict(json.loads(text))
         except json.JSONDecodeError as e:
             logger.warning(f"DeepSeek attempt {attempt+1}: JSON error ({e}), retrying...")
             if attempt < retries:
@@ -1410,6 +1418,10 @@ async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: 
     for i, (name, res) in enumerate(zip(model_names, results)):
         if isinstance(res, Exception) or res is None:
             logger.warning(f"{name} failed, skipping vote")
+            continue
+
+        if not isinstance(res, dict):
+            logger.warning(f"{name} returned non-dict result ({type(res).__name__}), skipping vote")
             continue
 
         direction = res.get("direction", "").upper()
