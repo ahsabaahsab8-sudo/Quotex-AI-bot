@@ -668,9 +668,12 @@ async def _camoufox_login() -> str | None:
 
             logger.info("Camoufox: trade URL: %s", page.url)
 
-            # Extract token
-            token = await page.evaluate(
-                """
+            # Extract token — poll/wait for up to 60s instead of one-shot.
+            # The SSID cookie / window.settings.token is written only after the
+            # trade SPA's websocket auth completes, which is slower over a
+            # proxy on servers (was returning None on the VPS).
+            token = None
+            extract_js = """
                 () => {
                     try { if (window.settings && window.settings.token) return window.settings.token; } catch(e) {}
                     try {
@@ -684,16 +687,29 @@ async def _camoufox_login() -> str | None:
                         }
                     } catch(e) {}
                     try { var s = document.cookie.match(/ssid=([^;]+)/); return s ? s[1] : null; } catch(e) {}
+                    try { var l = localStorage.getItem('token') || localStorage.getItem('ssid'); if (l) return l; } catch(e) {}
+                    try { var st = sessionStorage.getItem('token') || sessionStorage.getItem('ssid'); if (st) return st; } catch(e) {}
                     return null;
                 }
-                """
-            )
-            if not token:
-                cookies = await page.context.cookies()
-                for c in cookies:
-                    if "ssid" in c["name"].lower():
-                        token = c["value"]
-                        break
+            """
+            for _attempt in range(20):  # 20 x 3s = up to 60s
+                try:
+                    token = await page.evaluate(extract_js)
+                except Exception:
+                    token = None
+                if not token:
+                    try:
+                        cookies = await page.context.cookies()
+                        for c in cookies:
+                            if "ssid" in c["name"].lower():
+                                if c.get("value"):
+                                    token = c["value"]
+                                    break
+                    except Exception:
+                        pass
+                if token:
+                    break
+                await asyncio.sleep(3)
 
             ua = await page.evaluate("navigator.userAgent")
             logger.info("Camoufox: token: %s...%s", token[:8] if token else "None", token[-4:] if token else "")
