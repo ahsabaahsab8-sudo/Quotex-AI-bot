@@ -193,6 +193,27 @@ def stop_watchdog():
         logger.info("Token watchdog stopped")
 
 
+async def _connect_with_retries(email, token, session, attempts=3, delay=3):
+    """Try connecting with a token several times before giving up.
+
+    Proxy hiccups are transient; retrying the same still-valid token avoids
+    triggering a costly Camoufox re-login on every brief proxy failure.
+    """
+    last_err = None
+    for i in range(1, attempts + 1):
+        client, err = await _connect_with_token(email, token, session)
+        if client:
+            return client, None
+        last_err = err
+        if i < attempts:
+            logger.warning(
+                "Connection attempt %d/%d failed (%s); retrying in %ds...",
+                i, attempts, err, delay,
+            )
+            await asyncio.sleep(delay)
+    return None, last_err
+
+
 async def get_quotex_connection():
     global _client
 
@@ -217,12 +238,12 @@ async def get_quotex_connection():
     token = session.get("token") if session else None
 
     if token:
-        _client, err = await _connect_with_token(email, token, session)
+        _client, err = await _connect_with_retries(email, token, session)
         if _client:
             logger.info("Quotex connected via existing SSID")
             start_watchdog()
             return _client
-        logger.warning("SSID expired or invalid, attempting auto-renew...")
+        logger.warning("SSID connection failed after retries (%s); attempting auto-renew...", err)
 
     logger.info("Auto-renewing SSID...")
     try:
@@ -236,7 +257,7 @@ async def get_quotex_connection():
                               "are set in .env")
 
     session = load_session()
-    _client, err = await _connect_with_token(email, new_token, session)
+    _client, err = await _connect_with_retries(email, new_token, session)
     if not _client:
         raise ConnectionError(f"pyquotex connect failed after renewal: {err}")
 
