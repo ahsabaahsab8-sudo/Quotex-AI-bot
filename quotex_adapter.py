@@ -6,6 +6,7 @@ Proactive watchdog refreshes token every 20 min before expiry."""
 
 import os
 import json
+import time
 import asyncio
 import logging
 from datetime import datetime
@@ -46,9 +47,14 @@ def load_session() -> dict | None:
 async def _connect_with_token(email, token, session):
     from pyquotex.stable_api import Quotex
     proxy_str = os.getenv("TELEGRAM_PROXY") or os.getenv("QUOTEX_PROXY")
-    proxies = {"http": proxy_str, "https": proxy_str} if proxy_str else None
-    if proxy_str:
-        logger.info("pyquotex: using proxy %s", proxy_str)
+    if not proxy_str:
+        raise ConnectionError(
+            "Proxy required: set QUOTEX_PROXY (or TELEGRAM_PROXY) in .env "
+            "so pyquotex always reaches Quotex through a proxy IP."
+        )
+    _install_proxy_patch(proxy_str)
+    logger.info("pyquotex: connecting to Quotex via proxy %s", proxy_str)
+    proxies = {"http": proxy_str, "https": proxy_str}
     client = Quotex(
         email=email,
         password='not-needed',
@@ -69,6 +75,80 @@ async def _connect_with_token(email, token, session):
         return None, msg
     await client.api.event_registry.wait_event("instruments_ready", timeout=30)
     return client, None
+
+
+def _install_proxy_patch(proxy_str: str) -> None:
+    """Force pyquotex's HTTP (httpx) and WebSocket transports through the proxy.
+
+    Stock pyquotex ignores the ``proxies`` parameter: ``Browser()`` is built
+    with no args in ``api.py`` and ``websockets.connect()`` has no proxy arg,
+    so both connection points are patched at runtime here.
+    """
+    if getattr(_install_proxy_patch, "_installed", None) == proxy_str:
+        return
+
+    import httpx
+    import websockets
+    import pyquotex.api as api_mod
+    import pyquotex.network.navigator as nav_mod
+    from pyquotex.network.navigator import Browser as _OrigBrowser
+    from pyquotex.network.ssl_utils import (
+        create_ssl_context,
+        CIPHER_SUITE_FIREFOX,
+    )
+    from pyquotex.ws.client import WebsocketClient
+
+    class _ProxyBrowser(_OrigBrowser):
+        def __init__(self, *args, **kwargs):
+            self.response = None
+            self.default_headers = None
+            self.source_address = kwargs.pop("source_address", None)
+            self.server_hostname = kwargs.pop("server_hostname", None)
+            self.proxies = proxy_str
+            self.debug = kwargs.pop("debug", False)
+            self._ssl_context = create_ssl_context(cipher_suite=CIPHER_SUITE_FIREFOX)
+            if self.server_hostname:
+                self._ssl_context.check_hostname = False
+            self.headers = self.get_headers()
+            self._client = httpx.AsyncClient(
+                verify=self._ssl_context,
+                timeout=30.0,
+                follow_redirects=True,
+                proxy=proxy_str,
+            )
+
+    _orig_connect_once = WebsocketClient._connect_once
+
+    async def _proxy_connect_once(self, url, extra_headers, ssl):
+        headers = extra_headers or {}
+        async with websockets.connect(
+            url,
+            additional_headers=headers,
+            ssl=ssl,
+            proxy=proxy_str,
+            ping_interval=24,
+            ping_timeout=20,
+            max_size=2 ** 23,
+            compression=None,
+        ) as ws:
+            self._ws = ws
+            self.api.last_message_at = time.monotonic()
+            await self.api._on_open()
+            self._open_count += 1
+            if self._open_count > 1:
+                asyncio.create_task(self._replay_subscriptions())
+            self._start_watchdog()
+            try:
+                async for raw in ws:
+                    await self.api._on_message(raw)
+            finally:
+                self._stop_watchdog()
+
+    nav_mod.Browser = _ProxyBrowser
+    api_mod.Browser = _ProxyBrowser
+    WebsocketClient._connect_once = _proxy_connect_once
+    _install_proxy_patch._installed = proxy_str
+    logger.info("pyquotex proxy patch installed: %s", proxy_str)
 
 
 async def _renew_token() -> str | None:
