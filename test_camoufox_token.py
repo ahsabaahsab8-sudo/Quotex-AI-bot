@@ -24,6 +24,7 @@ async def main():
         humanize=True,
         geoip=True,
         disable_coop=True,
+        headless=True,
         proxy=PROXY,
     ) as browser:
         page = await browser.new_page()
