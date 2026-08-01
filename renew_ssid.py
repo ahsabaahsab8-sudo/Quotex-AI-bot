@@ -651,6 +651,7 @@ async def _camoufox_login() -> str | None:
                 (args) => {
                     var emails = document.querySelectorAll('input[name="email"]');
                     var passes = document.querySelectorAll('input[name="password"]');
+                    if (!emails.length || !passes.length) return "no inputs found";
                     var email = emails.length > 1 ? emails[1] : emails[0];
                     var pass = passes.length > 1 ? passes[1] : passes[0];
                     email.value = args[0];
@@ -670,7 +671,10 @@ async def _camoufox_login() -> str | None:
                 """,
                 [email, password]
             )
-            logger.info("Camoufox: %s", login_result)
+            logger.info("Camoufox: form result: %s", login_result)
+            if login_result == "no inputs found":
+                logger.info("Camoufox: current URL: %s", page.url)
+                logger.info("Camoufox: page title: %s", await page.title())
             await asyncio.sleep(10)
 
             # Navigate to trade page if not already there
