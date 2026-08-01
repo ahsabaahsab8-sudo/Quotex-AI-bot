@@ -568,6 +568,24 @@ async def _camoufox_login() -> str | None:
             disable_coop=True,
             headless=True,
             proxy=proxy_cfg,
+            firefox_user_prefs={
+                # Skip glxtest/GPU detection — missing glxtest binary SIGSEGVs
+                # on headless Linux containers (daijro/camoufox#456)
+                "gfx.xrender.enabled": False,
+                "layers.acceleration.disabled": True,
+                "gfx.canvas.accelerated": False,
+                "webgl.disabled": True,
+                "webgl.enable-webgl2": False,
+                "gfx.x11-egl.force-disabled": True,
+                # Disable Firefox prompts that block in non-interactive envs
+                "security.prompt_for_key_storage_type": False,
+                "signon.masterPasswordRequired": False,
+                "signon.rememberSignons": False,
+                "signon.autofillForms": False,
+                "security.default_personal_cert": "Select Automatically",
+                "accessibility.force_disabled": 1,
+                "browser.downgrade.enabled": True,
+            },
         ) as browser:
             page = await browser.new_page()
 
