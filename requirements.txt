@@ -1,6 +1,6 @@
 playwright>=1.60.0
 patchright>=1.61.2
-pyquotex>=1.1.0
+git+https://github.com/cleitonleonel/pyquotex.git
 websockets>=13.0
 httpx[socks]>=0.28
 python-socks>=2.0
