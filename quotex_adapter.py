@@ -157,7 +157,10 @@ def _install_proxy_patch(proxy_str: str) -> None:
 
 
 async def _renew_token() -> str | None:
-    """Renew SSID — tries API first, falls back to Playwright."""
+    """Renew SSID — OpenClaw agent first, then Camoufox/Playwright fallbacks.
+
+    renew_ssid() already tries the OpenClaw agent (openclaw_renewal) before
+    its built-in browser methods, so this just delegates to it."""
     from renew_ssid import renew_ssid
     return await renew_ssid(force_playwright=False)
 

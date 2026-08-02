@@ -127,12 +127,24 @@ class QuotexSessionKeeper:
             token = saved["token"]
             logger.info(f"Loaded SSID from session.json: {token[:12]}...")
             return token
-        logger.info("No saved SSID, fetching fresh token...")
-        token = await refresh_token_via_api(self.email, self.password)
+        logger.info("No saved SSID, fetching fresh token via OpenClaw...")
+        token = await self._fetch_fresh_token()
         if token:
             save_session(self.email, token)
             return token
         return None
+
+    async def _fetch_fresh_token(self) -> str | None:
+        # PRIMARY: OpenClaw agent does the browser login + token extraction.
+        try:
+            from openclaw_renewal import renew_via_openclaw
+            token = await renew_via_openclaw()
+            if token:
+                return token
+        except Exception as e:
+            logger.warning(f"OpenClaw token fetch error: {e}")
+        # FALLBACK: API-based login.
+        return await refresh_token_via_api(self.email, self.password)
 
     async def _connect_with_ssid(self, ssid: str) -> bool:
         try:
@@ -153,8 +165,8 @@ class QuotexSessionKeeper:
             return False
 
     async def _refresh_and_reconnect(self) -> bool:
-        logger.info("Refreshing SSID...")
-        token = await refresh_token_via_api(self.email, self.password)
+        logger.info("Refreshing SSID via OpenClaw...")
+        token = await self._fetch_fresh_token()
         if not token:
             logger.error("Token refresh failed")
             return False

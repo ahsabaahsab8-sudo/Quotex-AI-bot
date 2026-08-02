@@ -744,12 +744,27 @@ async def _camoufox_login() -> str | None:
 
 
 async def renew_ssid(force_playwright: bool = False) -> str | None:
-    """Renew SSID: Camoufox (primary, cross-platform), Kameleo (Windows), falls back to undetected-chromedriver."""
+    """Renew SSID: OpenClaw agent (primary), then Camoufox -> Kameleo -> undetected-chromedriver.
+
+    The OpenClaw path (openclaw_renewal.renew_via_openclaw) handles the
+    browser login + token extraction by delegating to the OpenClaw CLI agent.
+    Camoufox / Kameleo / undetected-chromedriver remain as fallbacks below.
+    """
     email = os.getenv("QUOTEX_EMAIL")
     password = os.getenv("QUOTEX_PASSWORD")
     if not email or not password:
         logger.error("QUOTEX_EMAIL / QUOTEX_PASSWORD not set in .env")
         return None
+
+    # PRIMARY: let the OpenClaw agent do the login + token extraction.
+    try:
+        from openclaw_renewal import renew_via_openclaw
+        token = await renew_via_openclaw()
+        if token:
+            return token
+        logger.warning("OpenClaw renewal failed; falling back to Camoufox/Playwright...")
+    except Exception as e:
+        logger.warning("OpenClaw renewal error: %s", e)
 
     last_err = None
     for attempt in range(1, MAX_RETRIES + 1):
