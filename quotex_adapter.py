@@ -209,11 +209,12 @@ def stop_watchdog():
         logger.info("Token watchdog stopped")
 
 
-async def _connect_with_retries(email, token, session, attempts=3, delay=3):
+async def _connect_with_retries(email, token, session, attempts=4, delay=3):
     """Try connecting with a token several times before giving up.
 
     Proxy hiccups are transient; retrying the same still-valid token avoids
     triggering a costly Camoufox re-login on every brief proxy failure.
+    Backs off a bit between attempts (3s, 6s, 10s, ...).
     """
     last_err = None
     for i in range(1, attempts + 1):
@@ -222,11 +223,12 @@ async def _connect_with_retries(email, token, session, attempts=3, delay=3):
             return client, None
         last_err = err
         if i < attempts:
+            wait = delay * i
             logger.warning(
                 "Connection attempt %d/%d failed (%s); retrying in %ds...",
-                i, attempts, err, delay,
+                i, attempts, err, wait,
             )
-            await asyncio.sleep(delay)
+            await asyncio.sleep(wait)
     return None, last_err
 
 
@@ -432,8 +434,10 @@ def _parse_timeframes_from_item(item) -> list[int] | None:
     """Extract active timeframes from a raw instrument row.
 
     Quotex embeds per-asset active timeframes in the raw instruments data:
-    row[12] is a list of timeframe entries and row[15] is a list of dicts
-    carrying a "time" field. Mirrors the proven A11ksa API parser.
+    row[12] is a list of [period, "put"/"call"] pairs and is the ONLY
+    authoritative source. row[15] is per-timeframe payout info (price 0 means
+    the timeframe is NOT available) and always lists every period, so it must
+    NOT be merged in, otherwise inactive timeframes leak into the menu.
     """
     tfs = []
     if isinstance(item, dict):
@@ -471,13 +475,6 @@ def _parse_timeframes_from_item(item) -> list[int] | None:
                 elif isinstance(x, (int, str)):
                     try:
                         tfs.append(int(x))
-                    except (ValueError, TypeError):
-                        pass
-        if len(item) > 15 and isinstance(item[15], list):
-            for obj in item[15]:
-                if isinstance(obj, dict) and obj.get("time") is not None:
-                    try:
-                        tfs.append(int(obj["time"]))
                     except (ValueError, TypeError):
                         pass
         return sorted(set(tfs)) if tfs else None

@@ -8,6 +8,8 @@ import imaplib
 import email as email_lib
 import re
 import time
+from datetime import datetime, timedelta
+from email.utils import parsedate_to_datetime
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,6 +18,10 @@ logger = logging.getLogger(__name__)
 
 SESSION_FILE = os.path.join(os.path.dirname(__file__), "session.json")
 MAX_RETRIES = 3
+
+# UID of the last OTP email consumed by auto_read_otp_sync, so a stale code
+# is never resubmitted on a later renewal attempt.
+_last_otp_uid = None
 
 
 def load_session() -> dict | None:
@@ -53,7 +59,41 @@ def save_session(email: str, token: str, ua: str = ""):
         logger.error(f"Failed to save session: {e}")
 
 
+def _extract_otp(text: str) -> str | None:
+    """Extract the actual OTP pin from a Quotex 'Authentication pincode' email.
+
+    The email is HTML-only; the first 4-6 digit string in the raw HTML is
+    '1999' from the doctype (http://www.w3.org/1999/xhtml), so a naive regex
+    returns the wrong code. Anchor on the 'PIN-code' label instead.
+    """
+    if not text:
+        return None
+    body = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+    body = re.sub(r"<script[^>]*>.*?</script>", " ", body, flags=re.DOTALL | re.IGNORECASE)
+    visible = re.sub(r"<[^>]+>", " ", body)
+    m = re.search(
+        r"(?:pin[-\s]?code|authentication\s*pin|verification\s*cod?e)"
+        r"[^0-9]{0,60}?(\d{4,6})",
+        visible, re.IGNORECASE,
+    )
+    if m:
+        return m.group(1)
+    candidates = re.findall(r"\b(\d{4,6})\b", visible)
+    for c in reversed(candidates):
+        if c.strip("0") and c != "1999":
+            return c
+    return None
+
+
 def auto_read_otp_sync(timeout: int = 60) -> str | None:
+    """Read the latest Quotex pincode from Gmail.
+
+    Searches by RECENCY (last 24h), not UNSEEN: opening the email in the
+    phone's Gmail app marks it read, so an UNSEEN-only search misses it. Each
+    returned code is consumed exactly once (module-level UID tracker), so a
+    stale code is never resubmitted on a later renewal attempt.
+    """
+    global _last_otp_uid
     imap_user = os.getenv("IMAP_EMAIL") or os.getenv("QUOTEX_EMAIL")
     imap_pass = os.getenv("IMAP_PASSWORD")
     if not imap_pass:
@@ -63,22 +103,46 @@ def auto_read_otp_sync(timeout: int = 60) -> str | None:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(imap_user, imap_pass)
         mail.select("inbox")
+        since_date = (datetime.now() - timedelta(days=1)).strftime("%d-%b-%Y")
+        cutoff = datetime.now() - timedelta(minutes=20)
         for _ in range(timeout):
-            _, data = mail.search(None, '(FROM "quotex" UNSEEN)')
-            for num in reversed(data[0].split()):
-                _, msg_data = mail.fetch(num, "(RFC822)")
+            try:
+                _, data = mail.search(None, f'(FROM "quotex" SINCE {since_date})')
+            except Exception:
+                data = (None, [b""])
+            nums = data[0].split() if data and data[0] else []
+            for num in reversed(nums):
+                if num == _last_otp_uid:
+                    continue
+                _, msg_data = mail.fetch(num, "(BODY.PEEK[])")
                 body = email_lib.message_from_bytes(msg_data[0][1])
+                try:
+                    sent = parsedate_to_datetime(str(body.get("Date", "")))
+                    if sent.replace(tzinfo=None) < cutoff:
+                        continue
+                except Exception:
+                    pass
+                text = ""
                 if body.is_multipart():
-                    text = ""
                     for part in body.walk():
-                        if part.get_content_type() == "text/plain":
+                        if part.get_content_type() == "text/html":
                             text = part.get_payload(decode=True).decode(errors='ignore')
                             break
+                    if not text:
+                        for part in body.walk():
+                            if part.get_content_type() == "text/plain":
+                                text = part.get_payload(decode=True).decode(errors='ignore')
+                                break
                 else:
                     text = body.get_payload(decode=True).decode(errors='ignore')
-                match = re.search(r'\b(\d{4,6})\b', text)
-                if match:
-                    return match.group(1)
+                otp = _extract_otp(text)
+                if otp:
+                    _last_otp_uid = num
+                    try:
+                        mail.store(num, "+FLAGS", "\\Seen")
+                    except Exception:
+                        pass
+                    return otp
             time.sleep(1)
         logger.warning(f"OTP not found after {timeout}s")
         return None
@@ -844,7 +908,48 @@ async def _camoufox_login() -> str | None:
             if login_result == "no inputs found":
                 logger.info("Camoufox: current URL: %s", page.url)
                 logger.info("Camoufox: page title: %s", await page.title())
-            await asyncio.sleep(10)
+            await asyncio.sleep(7)
+
+            # If Quotex demands a verification code (new IP login), the page
+            # stays on /sign-in. Auto-fill it from Gmail via IMAP OTP reader.
+            if "/sign-in" in page.url.lower():
+                logger.info("Camoufox: checking for OTP input...")
+                otp_el = None
+                for _ in range(6):  # up to ~18s for the OTP field to appear
+                    try:
+                        otp_el = await page.query_selector(
+                            'input[name="code"], input[name="otp"], '
+                            'input[autocomplete="one-time-code"]'
+                        )
+                    except Exception:
+                        otp_el = None
+                    if otp_el:
+                        break
+                    await asyncio.sleep(3)
+                if otp_el:
+                    otp = await asyncio.to_thread(auto_read_otp_sync, timeout=60)
+                    if otp:
+                        try:
+                            await otp_el.fill(otp)
+                            logger.info("Camoufox: OTP submitted")
+                            # The OTP form needs an explicit submit (button or
+                            # Enter), otherwise Quotex never processes the code.
+                            try:
+                                submit = await page.query_selector('button[type="submit"]')
+                                if submit:
+                                    await submit.click()
+                                    logger.info("Camoufox: OTP submit button clicked")
+                                else:
+                                    await page.keyboard.press("Enter")
+                                    logger.info("Camoufox: pressed Enter on OTP form")
+                            except Exception as e:
+                                logger.warning("Camoufox: OTP submit click failed (%s), pressing Enter", e)
+                                await page.keyboard.press("Enter")
+                            await asyncio.sleep(10)
+                        except Exception as e:
+                            logger.warning("Camoufox: OTP fill failed: %s", e)
+                    else:
+                        logger.warning("Camoufox: OTP input present but no code read from Gmail")
 
             # Navigate to trade page if not already there
             if "/trade" not in page.url:
