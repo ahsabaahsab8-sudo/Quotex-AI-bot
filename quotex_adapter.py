@@ -292,6 +292,37 @@ async def close_quotex_connection():
     _client = None
 
 
+def _ticks_to_candles(ticks: list[dict], period: int) -> list[dict]:
+    """Aggregate raw Quotex tick rows ({time, price, ...}) into OHLC candles.
+
+    For sub-minute periods (e.g. 30s) history/load returns per-tick price
+    rows instead of OHLC candles, so pyquotex's parser hands back dicts
+    without open/close/high/low. Group ticks into `period`-sized buckets.
+    """
+    buckets: dict[int, dict] = {}
+    for t in ticks:
+        if not isinstance(t, dict):
+            continue
+        try:
+            ts = float(t['time'])
+            price = float(t['price'])
+        except (KeyError, TypeError, ValueError):
+            continue
+        bucket = int(ts // period) * period
+        b = buckets.get(bucket)
+        if b is None:
+            buckets[bucket] = {
+                "time": bucket, "open": price, "high": price,
+                "low": price, "close": price, "volume": 1,
+            }
+            continue
+        b["high"] = max(b["high"], price)
+        b["low"] = min(b["low"], price)
+        b["close"] = price
+        b["volume"] += 1
+    return list(buckets.values())
+
+
 async def fetch_candles(client, token: str, count: int = 18000, timeframe: int = 60) -> list | None:
     try:
         amount = max(count, 3600)
@@ -304,6 +335,10 @@ async def fetch_candles(client, token: str, count: int = 18000, timeframe: int =
         )
         if not candles:
             return None
+        if isinstance(candles[0], dict) and "open" not in candles[0]:
+            candles = _ticks_to_candles(candles, timeframe)
+            if not candles:
+                return None
         return [{"time": int(c['time']), "open": float(c['open']), "close": float(c['close']),
                  "high": float(c['high']), "low": float(c['low']), "volume": float(c.get('volume', 0))}
                 for c in candles]

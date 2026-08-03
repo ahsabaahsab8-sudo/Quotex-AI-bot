@@ -169,12 +169,17 @@ async def pair_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    parts = query.data.split("_", 2)
-    if len(parts) != 3:
+    rest = query.data[3:] if query.data.startswith("tf_") else query.data
+    sep = rest.rfind("_")
+    if sep <= 0:
         await query.edit_message_text("❌ Invalid timeframe selection. Please start again.")
         return
-    pair = parts[1]
-    tf = int(parts[2])
+    pair = rest[:sep]
+    try:
+        tf = int(rest[sep + 1:])
+    except (ValueError, TypeError):
+        await query.edit_message_text("❌ Invalid timeframe selection. Please start again.")
+        return
     original_pair = pair
     display = format_pair_name(pair)
     tf_label = format_timeframe_label(tf)
