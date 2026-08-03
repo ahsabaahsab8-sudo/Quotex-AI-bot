@@ -17,7 +17,12 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 import main as bot_main
-from quotex_adapter import get_active_pairs as adapter_get_active_pairs, close_quotex_connection
+from quotex_adapter import (
+    get_active_pairs as adapter_get_active_pairs,
+    get_asset_timeframes as adapter_get_asset_timeframes,
+    format_timeframe_label,
+    close_quotex_connection,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -128,10 +133,53 @@ async def pair_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     pair = query.data.replace("pair_", "")
-    original_pair = pair
     display = format_pair_name(pair)
 
-    await query.edit_message_text(f"⏳ Analyzing *{display}*...\n\nStep 1/5: Connecting to Quotex...", parse_mode="Markdown")
+    await query.edit_message_text(f"⏳ Checking active timeframes for *{display}*...", parse_mode="Markdown")
+
+    try:
+        client = await bot_main.get_quotex_connection()
+        tfs = await adapter_get_asset_timeframes(client, pair)
+        await close_quotex_connection()
+    except Exception as e:
+        await query.edit_message_text(f"❌ Failed to connect to Quotex: {e}")
+        return
+
+    if not tfs:
+        await query.edit_message_text(f"❌ No active timeframes found for {display}")
+        return
+
+    keyboard, row = [], []
+    for tf in tfs:
+        row.append(InlineKeyboardButton(f"{format_timeframe_label(tf)}", callback_data=f"tf_{pair}_{tf}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="get_signal")])
+
+    await query.edit_message_text(
+        f"📊 *{display}*\n\nSelect a timeframe for AI analysis:\n\n"
+        f"The AI will study the pattern on the selected timeframe and signal the NEXT candle after the current one ends.",
+        reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown"
+    )
+
+
+async def timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split("_", 2)
+    if len(parts) != 3:
+        await query.edit_message_text("❌ Invalid timeframe selection. Please start again.")
+        return
+    pair = parts[1]
+    tf = int(parts[2])
+    original_pair = pair
+    display = format_pair_name(pair)
+    tf_label = format_timeframe_label(tf)
+
+    await query.edit_message_text(f"⏳ Analyzing *{display}* on {tf_label}...\n\nStep 1/5: Connecting to Quotex...", parse_mode="Markdown")
 
     try:
         client = await bot_main.get_quotex_connection()
@@ -139,32 +187,32 @@ async def pair_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"❌ Quotex connection failed: {e}")
         return
 
-    await query.edit_message_text(f"⏳ Analyzing *{display}*...\n\nStep 2/5: Fetching candles & calculating indicators...", parse_mode="Markdown")
+    await query.edit_message_text(f"⏳ Analyzing *{display}* on {tf_label}...\n\nStep 2/5: Fetching {tf_label} candles & calculating indicators...", parse_mode="Markdown")
 
-    tech_data = await bot_main.fetch_and_process_indicators(client, pair)
+    tech_data = await bot_main.fetch_and_process_indicators(client, pair, timeframe=tf)
     if tech_data is None:
-        await query.edit_message_text(f"❌ Failed to fetch candle data for {display}")
+        await query.edit_message_text(f"❌ Failed to fetch candle data for {display} on {tf_label}")
         await close_quotex_connection()
         return
     if tech_data == "LOW_VOLATILITY":
-        await query.edit_message_text(f"⚠️ {display} has LOW VOLATILITY right now. Cannot generate a reliable signal. Try again later.")
+        await query.edit_message_text(f"⚠️ {display} has LOW VOLATILITY on {tf_label} right now. Cannot generate a reliable signal. Try again later.")
         await close_quotex_connection()
         return
 
-    # Math score the selected pair
+    # Math score the selected pair on the selected timeframe
     math_score = bot_main.score_pair_math(tech_data["summary"])
-    logger.info(f"Math score for {pair}: {math_score}/10")
+    logger.info(f"Math score for {pair} @ {tf_label}: {math_score}/10")
 
     if math_score < 7.0:
         cat = bot_main.get_pair_category(pair)
         await query.edit_message_text(
-            f"⏳ *{display}* scores {math_score}/10 (low setup).\n\n"
+            f"⏳ *{display}* scores {math_score}/10 (low setup) on {tf_label}.\n\n"
             f"Step 3/5: Auto-scanning all {cat} pairs for better setup...",
             parse_mode="Markdown"
         )
         active_pairs = await get_active_pairs(client)
         cat_pairs = active_pairs.get(cat, [])
-        best = await bot_main.auto_scan_best_pair(client, cat, cat_pairs)
+        best = await bot_main.auto_scan_best_pair(client, cat, cat_pairs, timeframe=tf)
         if best and best["math_score"] > math_score:
             pair = best["code"]
             display = format_pair_name(pair)
@@ -183,7 +231,7 @@ async def pair_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
     else:
         await query.edit_message_text(
-            f"⏳ *{display}* scores {math_score}/10 (good setup).\n\n"
+            f"⏳ *{display}* scores {math_score}/10 (good setup) on {tf_label}.\n\n"
             f"Step 3/5: Running 3-stage AI pipeline...",
             parse_mode="Markdown"
         )
@@ -199,7 +247,7 @@ async def pair_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if direction == "SKIP":
         reason = ai_result.get("reason", "AI models determined no trade.")
         note = ai_result.get("note", "")
-        msg = f"⏭️ No signal for *{display}*\n\n{reason}"
+        msg = f"⏭️ No signal for *{display}* on {tf_label}\n\n{reason}"
         if note:
             msg += f"\n\n{note}"
         await query.edit_message_text(msg, parse_mode="Markdown")
@@ -218,11 +266,13 @@ async def pair_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "note": note,
         "martingale_recommendation": ai_result.get("martingale_recommendation", "M0"),
         "payout": tech_data["summary"].get("payout_percentage", 80),
+        "timeframe_seconds": tf,
+        "timeframe_label": tf_label,
     }
 
     signal_text = bot_main.format_telegram_signal(signal)
 
-    await query.edit_message_text(f"⏳ Analyzing *{display}*...\n\nStep 5/5: Sending signal...", parse_mode="Markdown")
+    await query.edit_message_text(f"⏳ Analyzing *{display}* on {tf_label}...\n\nStep 5/5: Sending signal...", parse_mode="Markdown")
 
     img = os.path.join(PROJECT_ROOT, "Image", f"{'up' if buy_sell == 'UP' else 'down'}_banner.png")
     if os.path.exists(img):
@@ -235,18 +285,22 @@ async def pair_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.message.reply_text(signal_text)
 
-    await query.edit_message_text(f"✅ Signal sent for *{display}*!\n\nCheck the messages above", parse_mode="Markdown")
+    await query.edit_message_text(f"✅ Signal sent for *{display}* on {tf_label}!\n\nCheck the messages above", parse_mode="Markdown")
 
+    # Wait for the current candle to end, then for the NEXT candle to close.
     PKT = timezone(timedelta(hours=5))
     now_pkt = datetime.now(PKT)
-    remaining = 60 - now_pkt.second
-    total_wait = remaining + 60
+    now_ts = now_pkt.timestamp()
+    remaining = tf - int(now_ts % tf)
+    if remaining == tf:
+        remaining = tf
+    total_wait = remaining + tf
     await asyncio.sleep(total_wait)
 
     try:
         client = await bot_main.get_quotex_connection()
         from quotex_adapter import fetch_candles
-        result_candles = await fetch_candles(client, signal["token"], count=180, timeframe=60)
+        result_candles = await fetch_candles(client, signal["token"], count=tf * 10 + 60, timeframe=tf)
         await close_quotex_connection()
 
         if result_candles and len(result_candles) >= 2:
@@ -306,6 +360,7 @@ def main():
     app.add_handler(CallbackQueryHandler(get_signal_menu, pattern="^get_signal$"))
     app.add_handler(CallbackQueryHandler(menu_category, pattern="^cat_"))
     app.add_handler(CallbackQueryHandler(pair_selected, pattern="^pair_"))
+    app.add_handler(CallbackQueryHandler(timeframe_selected, pattern="^tf_"))
     app.add_handler(CallbackQueryHandler(back_start, pattern="^back_start$"))
     app.add_error_handler(error_handler)
 

@@ -538,6 +538,174 @@ async def _patchright_login() -> str | None:
     return token
 
 
+def _parse_proxy(proxy_env: str) -> dict | None:
+    """Parse a socks5:// or http(s):// proxy URL into Playwright's proxy dict.
+
+    Returns {"server": "scheme://host:port", "username": ..., "password": ...},
+    or None if it cannot be parsed.
+    """
+    try:
+        from urllib.parse import urlparse, unquote
+        parts = urlparse(proxy_env)
+        if not parts.hostname or not parts.port:
+            return None
+        server = f"{parts.scheme}://{parts.hostname}:{parts.port}"
+        cfg = {"server": server}
+        if parts.username:
+            cfg["username"] = unquote(parts.username)
+        if parts.password:
+            cfg["password"] = unquote(parts.password)
+        return cfg
+    except Exception as e:
+        logger.error("Camoufox: failed to parse proxy %s: %s", proxy_env, e)
+        return None
+
+
+_SOCKS_RELAY = None
+
+
+class _Socks5Relay:
+    """Minimal local SOCKS5 relay (no auth) forwarding to an authenticated
+    upstream SOCKS5 proxy.
+
+    Playwright's Firefox cannot authenticate SOCKS5, so we expose an
+    unauthenticated local endpoint (socks5://127.0.0.1:<port>) and tunnel to
+    the real proxy (with user/pass from .env) using PySocks.
+    """
+
+    def __init__(self, upstream: str):
+        from urllib.parse import urlparse, unquote
+        parts = urlparse(upstream)
+        self.host = parts.hostname
+        self.port = parts.port
+        self.username = unquote(parts.username) if parts.username else None
+        self.password = unquote(parts.password) if parts.password else None
+        self._server = None
+        self._port = None
+
+    @property
+    def local_server(self) -> str:
+        return f"socks5://127.0.0.1:{self._port}"
+
+    def start(self) -> bool:
+        import threading
+        import socket as _sock
+        try:
+            self._server = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+            self._server.setsockopt(_sock.SOL_SOCKET, _sock.SO_REUSEADDR, 1)
+            self._server.bind(("127.0.0.1", 0))
+            self._server.listen(64)
+            self._port = self._server.getsockname()[1]
+            thread = threading.Thread(target=self._accept_loop, daemon=True)
+            thread.start()
+            logger.info("SOCKS relay up: %s -> %s:%s", self.local_server, self.host, self.port)
+            return True
+        except Exception as e:
+            logger.error("Failed to start SOCKS relay: %s", e)
+            return False
+
+    def _accept_loop(self):
+        import socket as _sock
+        import threading as _threading
+        while True:
+            try:
+                conn, _ = self._server.accept()
+                _threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
+            except Exception as e:
+                logger.warning("SOCKS relay accept loop stopped: %s", e)
+                break
+
+    def _handle(self, client):
+        import socket as _sock
+        try:
+            client.settimeout(60)
+            ver = client.recv(1)
+            if ver != b"\x05":
+                client.close()
+                return
+            nmethods = client.recv(1)[0]
+            client.recv(nmethods)
+            client.sendall(b"\x05\x00")  # no auth
+
+            header = client.recv(4)
+            if len(header) != 4 or header[0] != 0x05 or header[1] != 0x01:
+                client.close()
+                return
+            atyp = header[3]
+            if atyp == 0x01:
+                host = _sock.inet_ntoa(client.recv(4))
+            elif atyp == 0x03:
+                ln = client.recv(1)[0]
+                host = client.recv(ln).decode()
+            elif atyp == 0x04:
+                host = _sock.inet_ntop(_sock.AF_INET6, client.recv(16))
+            else:
+                client.close()
+                return
+            port = int.from_bytes(client.recv(2), "big")
+
+            import socks as _socks
+            up = _socks.socksocket()
+            up.settimeout(60)
+            up.set_proxy(
+                _socks.SOCKS5, self.host, self.port,
+                username=self.username, password=self.password,
+            )
+            up.connect((host, port))
+
+            client.sendall(b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00")
+            self._pump(client, up)
+        except Exception as e:
+            logger.warning("SOCKS relay connection error: %s", e)
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+    def _pump(self, client, upstream):
+        import socket as _sock
+        import select
+        sockets = [client, upstream]
+        while True:
+            try:
+                r, _, _ = select.select(sockets, [], [], 30)
+                if not r:
+                    continue
+                for s in r:
+                    data = s.recv(65536)
+                    if not data:
+                        return
+                    dst = upstream if s is client else client
+                    dst.sendall(data)
+            except Exception:
+                return
+
+
+def _ensure_socks_relay() -> dict | None:
+    """Return a Camoufox-compatible (no-auth) proxy dict for the env proxy.
+
+    For socks5 proxies with credentials, spawn a local relay so Playwright can
+    use it. For plain http(s)/no-auth socks5, use the proxy directly.
+    """
+    global _SOCKS_RELAY
+    proxy_env = os.getenv("CAMOUFOX_PROXY") or os.getenv("QUOTEX_PROXY") or os.getenv("TELEGRAM_PROXY")
+    if not proxy_env:
+        return None
+    from urllib.parse import urlparse
+    parts = urlparse(proxy_env)
+    has_auth = bool(parts.username or parts.password)
+    if parts.scheme.startswith("socks") and has_auth:
+        if _SOCKS_RELAY is None or _SOCKS_RELAY.host != parts.hostname or _SOCKS_RELAY.port != parts.port:
+            relay = _Socks5Relay(proxy_env)
+            if relay.start():
+                _SOCKS_RELAY = relay
+            else:
+                return None
+        return {"server": _SOCKS_RELAY.local_server}
+    return _parse_proxy(proxy_env)
+
+
 async def _camoufox_login() -> str | None:
     """Login via Camoufox (custom Firefox build with C++ stealth).
     Works on both Windows and Linux. Bypasses Cloudflare reliably."""
@@ -555,16 +723,17 @@ async def _camoufox_login() -> str | None:
     token = None
     ua = None
     try:
-        # Optional proxy from env var: TELEGRAM_PROXY, QUOTEX_PROXY, or CAMOUFOX_PROXY
-        proxy_cfg = None
-        proxy_env = os.getenv("TELEGRAM_PROXY") or os.getenv("QUOTEX_PROXY") or os.getenv("CAMOUFOX_PROXY")
-        if proxy_env:
-            proxy_cfg = {"server": proxy_env}
+        # Proxy from env: CAMOUFOX_PROXY, QUOTEX_PROXY, then TELEGRAM_PROXY.
+        # Camoufox must use the Quotex proxy, NOT the Telegram proxy.
+        # SOCKS5-with-auth proxies get a local no-auth relay (Playwright cannot
+        # authenticate SOCKS5); everything else is passed straight through.
+        proxy_cfg = _ensure_socks_relay()
+        if proxy_cfg:
             logger.info("Camoufox: using proxy from env")
 
         async with AsyncCamoufox(
             humanize=True,
-            geoip=True,
+            geoip=False,
             disable_coop=True,
             headless=True,
             proxy=proxy_cfg,
@@ -744,11 +913,12 @@ async def _camoufox_login() -> str | None:
 
 
 async def renew_ssid(force_playwright: bool = False) -> str | None:
-    """Renew SSID: OpenClaw agent (primary), then Camoufox -> Kameleo -> undetected-chromedriver.
+    """Renew SSID: Camoufox (primary), then Kameleo -> undetected-chromedriver,
+    with OpenClaw as a final fallback.
 
-    The OpenClaw path (openclaw_renewal.renew_via_openclaw) handles the
-    browser login + token extraction by delegating to the OpenClaw CLI agent.
-    Camoufox / Kameleo / undetected-chromedriver remain as fallbacks below.
+    Camoufox is the main token-extraction path (custom Firefox build that
+    bypasses Cloudflare), routing through the Quotex proxy from .env.
+    OpenClaw (openclaw_renewal.renew_via_openclaw) remains only as a fallback.
     """
     email = os.getenv("QUOTEX_EMAIL")
     password = os.getenv("QUOTEX_PASSWORD")
@@ -756,21 +926,11 @@ async def renew_ssid(force_playwright: bool = False) -> str | None:
         logger.error("QUOTEX_EMAIL / QUOTEX_PASSWORD not set in .env")
         return None
 
-    # PRIMARY: let the OpenClaw agent do the login + token extraction.
-    try:
-        from openclaw_renewal import renew_via_openclaw
-        token = await renew_via_openclaw()
-        if token:
-            return token
-        logger.warning("OpenClaw renewal failed; falling back to Camoufox/Playwright...")
-    except Exception as e:
-        logger.warning("OpenClaw renewal error: %s", e)
-
     last_err = None
     for attempt in range(1, MAX_RETRIES + 1):
         logger.info("SSID renewal attempt %d/%d...", attempt, MAX_RETRIES)
 
-        # Camoufox works on both Windows and Linux
+        # PRIMARY: Camoufox (works on both Windows and Linux)
         try:
             token = await _camoufox_login()
             if token:
@@ -802,6 +962,16 @@ async def renew_ssid(force_playwright: bool = False) -> str | None:
             wait = attempt * 10
             logger.info("Retrying in %ds...", wait)
             await asyncio.sleep(wait)
+
+    # FINAL FALLBACK: OpenClaw agent (only reached if all above failed)
+    try:
+        from openclaw_renewal import renew_via_openclaw
+        token = await renew_via_openclaw()
+        if token:
+            return token
+        logger.warning("OpenClaw renewal failed; giving up.")
+    except Exception as e:
+        logger.warning("OpenClaw renewal error: %s", e)
 
     logger.error("SSID renewal failed after %d attempts: %s", MAX_RETRIES, last_err)
     return None

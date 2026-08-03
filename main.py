@@ -261,10 +261,31 @@ def compute_higher_tf_metrics(df: pd.DataFrame, minutes: int, token: str, payout
     if resampled is None or len(resampled) < 10:
         return None
     candles = resampled.to_dict('records')
-    return compute_indicators(candles, token=token, payout=payout, compute_htf=False)
+    return compute_indicators(candles, token=token, payout=payout, compute_htf=False, timeframe=minutes * 60)
 
 
-def compute_indicators(candles: list[dict], token: str = "EURUSD_otc", payout: int = 80, compute_htf: bool = True) -> dict:
+def format_timeframe_label(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds}s"
+    mins = seconds / 60
+    if mins.is_integer():
+        m = int(mins)
+        if m < 60:
+            return f"{m}m"
+        h = m / 60
+        if h.is_integer() and m % 60 == 0:
+            hr = int(h)
+            if hr < 24:
+                return f"{hr}h"
+            d = hr / 24
+            if hr % 24 == 0:
+                return f"{int(d)}d"
+        return f"{m}m"
+    hours = mins / 60
+    return f"{hours:g}h"
+
+
+def compute_indicators(candles: list[dict], token: str = "EURUSD_otc", payout: int = 80, compute_htf: bool = True, timeframe: int = 60) -> dict:
     df = pd.DataFrame(candles)
     df['close'] = df['close'].astype(float)
     df['high'] = df['high'].astype(float)
@@ -280,6 +301,8 @@ def compute_indicators(candles: list[dict], token: str = "EURUSD_otc", payout: i
             "current_price": float(df['close'].iloc[-1]) if not df.empty else 0,
             "latest_atr": 0.0005, "average_atr_20": 0.0005,
             "payout_percentage": payout, "low_volatility": True,
+            "analysis_timeframe_seconds": timeframe,
+            "analysis_timeframe_label": format_timeframe_label(timeframe),
             "nearest_round_numbers": get_nearest_round_numbers(float(df['close'].iloc[-1])) if not df.empty else {},
             "color_probabilities": {"color_sequence_last_10": [], "last_3_sequence": "", "historical_probability": {"next_green_percentage": 50, "next_red_percentage": 50, "occurrences_found": 0}},
             "detected_candlestick_patterns": [], "ema_alignment": "MIXED",
@@ -588,6 +611,8 @@ def compute_indicators(candles: list[dict], token: str = "EURUSD_otc", payout: i
         "average_atr_20": avg_atr_20,
         "payout_percentage": payout,
         "low_volatility": latest_atr < 0.0001,
+        "analysis_timeframe_seconds": timeframe,
+        "analysis_timeframe_label": format_timeframe_label(timeframe),
         "nearest_round_numbers": get_nearest_round_numbers(close_1m),
         "color_probabilities": calculate_color_probabilities(df),
         "detected_candlestick_patterns": detected_patterns,
@@ -701,8 +726,11 @@ def detect_candlestick_patterns(df: pd.DataFrame) -> list:
     return patterns
 
 
-async def fetch_and_process_indicators(client, token: str, payout: int = 80):
-    candles_data = await adapter_fetch_candles(client, token, count=18000, timeframe=60)
+async def fetch_and_process_indicators(client, token: str, payout: int = 80, timeframe: int = 60):
+    # Scale the historical window so every timeframe yields ~600 candles
+    # (Bollinger/SMA200 need 200+; 5m at 18000s would only give 60).
+    amount_of_seconds = max(timeframe * 600, 3600)
+    candles_data = await adapter_fetch_candles(client, token, count=amount_of_seconds, timeframe=timeframe)
     if candles_data is None:
         logger.error(f"Failed to fetch candles for {token}")
         return None
@@ -713,7 +741,7 @@ async def fetch_and_process_indicators(client, token: str, payout: int = 80):
 
     candles = candles_data
 
-    summary = compute_indicators(candles, token=token, payout=payout)
+    summary = compute_indicators(candles, token=token, payout=payout, timeframe=timeframe)
     if summary.get("low_volatility", False):
         logger.info(f"{token} has LOW VOLATILITY, marking as skip.")
         return "LOW_VOLATILITY"
@@ -794,12 +822,12 @@ def score_pair_math(summary: dict) -> float:
     return round(max(0.0, min(10.0, score)), 1)
 
 
-async def auto_scan_best_pair(client, category: str, pairs: list, top_n: int = 1) -> dict | None:
+async def auto_scan_best_pair(client, category: str, pairs: list, top_n: int = 1, timeframe: int = 60) -> dict | None:
     scored = []
     for payout, code in pairs:
         try:
             tech = await asyncio.wait_for(
-                fetch_and_process_indicators(client, code, payout),
+                fetch_and_process_indicators(client, code, payout, timeframe=timeframe),
                 timeout=30.0
             )
         except (asyncio.TimeoutError, Exception):
@@ -838,6 +866,9 @@ Your primary goal is CAPITAL PROTECTION. Your secondary goal is HIGH PROBABILITY
 
 ### DATA INPUT
 {data_json}
+
+### TIMEFRAME CONTEXT
+The `analysis_timeframe_seconds` / `analysis_timeframe_label` fields in the data identify the candle timeframe that ALL primary indicators (`metrics_1m`, `ema_alignment`, `adx`, `bollinger_squeeze`, etc.) were computed on. Do NOT assume 1 minute. `metrics_5m` and `metrics_15m` (if present) are higher-timeframe context derived by resampling. Interpret every threshold relative to the analysis timeframe: sub-minute timeframes are noisier, higher timeframes trend cleaner.
 
 ### ANALYZE ALL 20 TRADING FACTORS BY TIER IN THIS EXACT ORDER
 
@@ -906,7 +937,7 @@ Your primary goal is CAPITAL PROTECTION. Your secondary goal is HIGH PROBABILITY
 - Check `color_probabilities` object: `next_green_percentage` between 59% and 85% = BUY. `next_red_percentage` between 59% and 85% = SELL.
 
 **19. Timeframe Matching**
-- 1 min trade must be aligned with 5 min trend configuration.
+- The analysis timeframe (`analysis_timeframe_label`) must be aligned with the higher timeframe trend configuration (`metrics_5m` / `metrics_15m`, if available). Trade with the HTF trend.
 
 **20. Session Filter**
 - Check `session_filter` object: `is_london_ny_overlap` = True indicates highest volume period (London/NY overlap).
@@ -1010,7 +1041,7 @@ Analyze the following technical telemetry data and decide the best course of act
 
 **9. Candlestick Pattern at Level** - pinbar at support/resistance.
 
-**10. HTF Alignment** - 1m matches 5m/15m trend.
+**10. HTF Alignment** - `analysis_timeframe_label` trend matches `metrics_5m`/`metrics_15m` trend (if available).
 
 #### TIER 3: EXTRA FILTERS - 10% Weight
 
@@ -1030,7 +1061,7 @@ Analyze the following technical telemetry data and decide the best course of act
 
 **18. OTC Color Probability** - next_green/red 59-85%.
 
-**19. Timeframe Matching** - 1m aligned with 5m.
+**19. Timeframe Matching** - `analysis_timeframe_label` aligned with `metrics_5m`/`metrics_15m` trend (if available).
 
 **20. Session Filter** - London/NY overlap.
 
@@ -1478,6 +1509,8 @@ def format_telegram_signal(signal: dict) -> str:
     reason = signal.get("reason", "")
     note = signal.get("note", "")
     martingale = signal.get("martingale_recommendation", "M0")
+    timeframe = int(signal.get("timeframe_seconds", 60))
+    timeframe_label = signal.get("timeframe_label") or format_timeframe_label(timeframe)
 
     is_otc = "_otc" in token.lower()
     display = token.replace("_otc", "").replace("_OTC", "")
@@ -1492,11 +1525,16 @@ def format_telegram_signal(signal: dict) -> str:
 
     PKT = timezone(timedelta(hours=5))
     now_pkt = datetime.now(PKT)
-    remaining = 60 - now_pkt.second
-    next_start = now_pkt.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    now_ts = now_pkt.timestamp()
+    elapsed = int(now_ts % timeframe)
+    remaining = timeframe - elapsed
+    if remaining == timeframe:
+        remaining = 0
+    candle_start = now_pkt.replace(microsecond=0) - timedelta(seconds=elapsed)
+    next_start = candle_start + timedelta(seconds=timeframe)
     trade_time = next_start.strftime("%H:%M:%S")
 
-    if remaining == 60:
+    if remaining == 0:
         countdown = "0s"
     else:
         countdown = f"{remaining}s"
@@ -1511,6 +1549,7 @@ def format_telegram_signal(signal: dict) -> str:
     parts = [
         "\U0001f4ca NEXT CANDLE SIGNAL",
         f"Pair: {pair_label}",
+        f"Timeframe: {timeframe_label}",
         f"Signal: {signal_emoji} {signal_text}",
         f"Confidence: {confidence}%",
         f"Trade Time: {trade_time}",
@@ -1518,7 +1557,7 @@ def format_telegram_signal(signal: dict) -> str:
         "",
         f"\u23f1\ufe0f Current candle ends in: {countdown}",
         "",
-        "Wait for the current candle to finish. Place 1 Minute trade at the Trade Time above.",
+        f"Wait for the current {timeframe_label} candle to finish. Place the {timeframe_label} trade at the Trade Time above.",
     ]
     if note:
         parts.append("")

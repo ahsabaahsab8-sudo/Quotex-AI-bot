@@ -17,6 +17,20 @@ _client = None
 _watchdog_task = None
 TOKEN_REFRESH_INTERVAL = 1200  # 20 minutes
 
+# Every timeframe Quotex can expose, in seconds.
+SUPPORTED_TIMEFRAMES = [
+    1, 5, 15, 30, 60, 120, 180, 300, 600, 900,
+    1800, 2700, 3600, 7200, 10800, 14400, 86400, 604800,
+]
+
+# Per-pair active timeframe cache: {pair: {"tfs": [...], "ts": epoch}}
+_TIMEFRAME_CACHE: dict[str, dict] = {}
+_TIMEFRAME_CACHE_TTL = 300.0  # 5 minutes
+
+# Raw instrument rows parsed once and reused for timeframe extraction.
+_instruments_tf_index = {"data": {}, "ts": 0.0}
+_INSTRUMENTS_INDEX_TTL = 60.0
+
 
 class SimpleCandle:
     def __init__(self, data: list):
@@ -46,15 +60,14 @@ def load_session() -> dict | None:
 
 async def _connect_with_token(email, token, session):
     from pyquotex.stable_api import Quotex
-    proxy_str = os.getenv("TELEGRAM_PROXY") or os.getenv("QUOTEX_PROXY")
-    if not proxy_str:
-        raise ConnectionError(
-            "Proxy required: set QUOTEX_PROXY (or TELEGRAM_PROXY) in .env "
-            "so pyquotex always reaches Quotex through a proxy IP."
-        )
-    _install_proxy_patch(proxy_str)
-    logger.info("pyquotex: connecting to Quotex via proxy %s", proxy_str)
-    proxies = {"http": proxy_str, "https": proxy_str}
+    proxy_str = os.getenv("QUOTEX_PROXY") or os.getenv("TELEGRAM_PROXY") or ""
+    proxies = None
+    if proxy_str:
+        _install_proxy_patch(proxy_str)
+        logger.info("pyquotex: connecting to Quotex via proxy %s", proxy_str)
+        proxies = {"http": proxy_str, "https": proxy_str}
+    else:
+        logger.info("pyquotex: connecting to Quotex DIRECTLY (no proxy)")
     client = Quotex(
         email=email,
         password='not-needed',
@@ -89,9 +102,9 @@ def _install_proxy_patch(proxy_str: str) -> None:
 
     import httpx
     import websockets
-    if int(websockets.__version__.split(".")[0]) < 13:
+    if int(websockets.__version__.split(".")[0]) < 15:
         raise ConnectionError(
-            "pyquotex proxy patch requires websockets>=13 "
+            "pyquotex proxy patch requires websockets>=15 "
             f"(found {websockets.__version__}). Run: pip install -U websockets"
         )
     import pyquotex.api as api_mod
@@ -355,3 +368,167 @@ async def get_asset_payout(client, asset: str) -> int:
     except Exception:
         pass
     return 80
+
+
+# ─── ACTIVE TIMEFRAME DISCOVERY ──────────────────────────────────────
+
+def format_timeframe_label(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds}s"
+    mins = seconds / 60
+    if mins.is_integer():
+        m = int(mins)
+        if m < 60:
+            return f"{m}m"
+        h = m / 60
+        if h.is_integer() and m % 60 == 0:
+            hr = int(h)
+            if hr < 24:
+                return f"{hr}h"
+            d = hr / 24
+            if hr % 24 == 0:
+                return f"{int(d)}d"
+        return f"{m}m"
+    hours = mins / 60
+    return f"{hours:g}h"
+
+
+def _parse_timeframes_from_item(item) -> list[int] | None:
+    """Extract active timeframes from a raw instrument row.
+
+    Quotex embeds per-asset active timeframes in the raw instruments data:
+    row[12] is a list of timeframe entries and row[15] is a list of dicts
+    carrying a "time" field. Mirrors the proven A11ksa API parser.
+    """
+    tfs = []
+    if isinstance(item, dict):
+        for key in ("timeframes", "available_timeframes", "active_timeframes"):
+            raw = item.get(key)
+            if not isinstance(raw, list):
+                continue
+            for x in raw:
+                if isinstance(x, (list, tuple)) and x:
+                    try:
+                        tfs.append(int(x[0]))
+                    except (ValueError, TypeError):
+                        pass
+                elif isinstance(x, dict) and x.get("time") is not None:
+                    try:
+                        tfs.append(int(x["time"]))
+                    except (ValueError, TypeError):
+                        pass
+                elif isinstance(x, (int, str)):
+                    try:
+                        tfs.append(int(x))
+                    except (ValueError, TypeError):
+                        pass
+            break
+        return sorted(set(tfs)) if tfs else None
+
+    if isinstance(item, (list, tuple)):
+        if len(item) > 12 and isinstance(item[12], list):
+            for x in item[12]:
+                if isinstance(x, (list, tuple)) and x:
+                    try:
+                        tfs.append(int(x[0]))
+                    except (ValueError, TypeError):
+                        pass
+                elif isinstance(x, (int, str)):
+                    try:
+                        tfs.append(int(x))
+                    except (ValueError, TypeError):
+                        pass
+        if len(item) > 15 and isinstance(item[15], list):
+            for obj in item[15]:
+                if isinstance(obj, dict) and obj.get("time") is not None:
+                    try:
+                        tfs.append(int(obj["time"]))
+                    except (ValueError, TypeError):
+                        pass
+        return sorted(set(tfs)) if tfs else None
+    return None
+
+
+async def _load_timeframe_index(client) -> dict:
+    """Cache {pair: [active_timeframes]} parsed from raw instruments."""
+    now = time.time()
+    if _instruments_tf_index["data"] and now - _instruments_tf_index["ts"] < _INSTRUMENTS_INDEX_TTL:
+        return _instruments_tf_index["data"]
+    try:
+        instruments = await _get_instruments(client)
+    except Exception as e:
+        logger.warning(f"Failed to load instruments for timeframe index: {e}")
+        return _instruments_tf_index["data"]
+
+    index = {}
+    for item in instruments:
+        sym, _, _ = _get_sym(item)
+        if not sym:
+            continue
+        tfs = _parse_timeframes_from_item(item)
+        if tfs:
+            index[sym] = tfs
+    if index:
+        _instruments_tf_index["data"] = index
+        _instruments_tf_index["ts"] = now
+    return index
+
+
+async def _probe_timeframes(client, pair: str) -> list[int]:
+    """Fallback: request a tiny candle batch per timeframe sequentially.
+
+    pyquotex shares the candles_ready_{asset} event per asset, so parallel
+    probes on the same asset would race — this runs sequentially. Only used
+    when the raw instrument rows carry no timeframe data.
+    """
+    active = []
+    for tf in SUPPORTED_TIMEFRAMES:
+        try:
+            candles = await client.get_candles(
+                asset=pair,
+                end_from_time=None,
+                offset=tf * 10,
+                period=tf,
+                timeout=5,
+            )
+            if candles:
+                active.append(tf)
+        except Exception as e:
+            logger.debug(f"Probe {pair} @ {tf}s failed: {e}")
+    return active
+
+
+def clear_timeframe_cache():
+    _TIMEFRAME_CACHE.clear()
+    _instruments_tf_index["data"] = {}
+    _instruments_tf_index["ts"] = 0.0
+
+
+async def get_asset_timeframes(client, pair: str) -> list[int]:
+    """Return the active timeframes Quotex has for a pair.
+
+    Primary: parse them straight from the raw instruments data (no extra
+    requests, instant). Fallback: probe each master timeframe with a tiny
+    candle request. Result is cached per pair for _TIMEFRAME_CACHE_TTL.
+    """
+    now = time.time()
+    cached = _TIMEFRAME_CACHE.get(pair)
+    if cached and now - cached.get("ts", 0) < _TIMEFRAME_CACHE_TTL:
+        return cached["tfs"]
+
+    tfs = []
+    try:
+        index = await _load_timeframe_index(client)
+        tfs = index.get(pair, [])
+    except Exception as e:
+        logger.warning(f"Timeframe index lookup failed for {pair}: {e}")
+
+    if not tfs:
+        logger.info(f"No timeframe metadata for {pair}; falling back to probe")
+        tfs = await _probe_timeframes(client, pair)
+
+    if not tfs:
+        tfs = [60]
+
+    _TIMEFRAME_CACHE[pair] = {"tfs": tfs, "ts": now}
+    return tfs
