@@ -85,14 +85,13 @@ def _extract_otp(text: str) -> str | None:
     return None
 
 
-def auto_read_otp_sync(timeout: int = 60) -> str | None:
+def auto_read_otp_sync(timeout: int = 120) -> str | None:
     """Read the latest Quotex pincode from Gmail FAST.
 
-    Only the newest few Quotex emails are inspected each poll (never a full
-    rescan of the last 24h), and already-seen emails are skipped, so a fresh
-    OTP is caught within ~1-2s of arriving instead of re-fetching the whole
-    mailbox. Each code is consumed exactly once (module-level UID tracker),
-    so a stale code is never resubmitted on a later renewal attempt.
+    Polls the newest messages by sequence number (immune to Gmail's IMAP
+    search-index lag for brand-new mail) and checks the FROM header for
+    Quotex. Searches All Mail so archived/mislabeled pincodes are still
+    found. Each code is consumed exactly once (module-level UID tracker).
     """
     global _last_otp_uid
     imap_user = os.getenv("IMAP_EMAIL") or os.getenv("QUOTEX_EMAIL")
@@ -104,25 +103,40 @@ def auto_read_otp_sync(timeout: int = 60) -> str | None:
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(imap_user, imap_pass)
-        mail.select("inbox")
-        since_date = (datetime.now() - timedelta(days=1)).strftime("%d-%b-%Y")
+        folder = "inbox"
+        for candidate in ('"[Gmail]/All Mail"', "inbox"):
+            try:
+                status, _ = mail.select(candidate)
+                if status == "OK":
+                    folder = candidate
+                    break
+            except Exception:
+                continue
         cutoff = datetime.now() - timedelta(minutes=20)
-        seen_uids = set()
+        seen = set()
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
-                _, data = mail.search(None, f'(FROM "quotex" SINCE {since_date})')
-            except Exception:
-                data = (None, [b""])
-            nums = data[0].split() if data and data[0] else []
-            for num in reversed(nums[-3:]):  # only the newest 3 messages
-                if num == _last_otp_uid or num in seen_uids:
+                status, count_data = mail.select(folder)
+                if status != "OK":
+                    time.sleep(1)
                     continue
-                seen_uids.add(num)
+                count = int(count_data[0])
+            except Exception:
+                time.sleep(1)
+                continue
+            for seq in range(max(1, count - 4), count + 1):  # newest 5
+                if seq in seen:
+                    continue
+                seen.add(seq)
                 try:
-                    _, msg_data = mail.fetch(num, "(BODY.PEEK[])")
+                    status, msg_data = mail.fetch(str(seq), "(BODY.PEEK[])")
+                    if status != "OK" or not msg_data or msg_data[0] is None:
+                        continue
                     body = email_lib.message_from_bytes(msg_data[0][1])
                 except Exception:
+                    continue
+                if "quotex" not in str(body.get("From", "")).lower():
                     continue
                 try:
                     sent = parsedate_to_datetime(str(body.get("Date", "")))
@@ -145,9 +159,9 @@ def auto_read_otp_sync(timeout: int = 60) -> str | None:
                     text = body.get_payload(decode=True).decode(errors='ignore')
                 otp = _extract_otp(text)
                 if otp:
-                    _last_otp_uid = num
+                    _last_otp_uid = seq
                     try:
-                        mail.store(num, "+FLAGS", "\\Seen")
+                        mail.store(str(seq), "+FLAGS", "\\Seen")
                     except Exception:
                         pass
                     return otp
@@ -410,7 +424,7 @@ async def _kameleo_login() -> str | None:
                 try:
                     otp_el = await page.query_selector('input[name="code"], input[name="otp"]')
                     if otp_el:
-                        otp = await asyncio.to_thread(auto_read_otp_sync, timeout=60)
+                        otp = await asyncio.to_thread(auto_read_otp_sync, timeout=120)
                         if otp:
                             await otp_el.fill(otp)
                             logger.info("OTP submitted")
@@ -564,7 +578,7 @@ async def _patchright_login() -> str | None:
                 try:
                     otp_el = await page.query_selector('input[name="code"], input[name="otp"]')
                     if otp_el:
-                        otp = await asyncio.to_thread(auto_read_otp_sync, timeout=60)
+                        otp = await asyncio.to_thread(auto_read_otp_sync, timeout=120)
                         if otp:
                             await otp_el.fill(otp)
                             logger.info("Patchright: OTP submitted")
