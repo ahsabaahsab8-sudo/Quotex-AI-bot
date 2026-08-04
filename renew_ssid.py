@@ -8,7 +8,7 @@ import imaplib
 import email as email_lib
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from dotenv import load_dotenv
 
@@ -115,7 +115,7 @@ def auto_read_otp_sync(timeout: int = 120) -> str | None:
                     break
             except Exception:
                 continue
-        cutoff = datetime.now() - timedelta(minutes=20)
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=20)
         seen = set()
         deadline = time.time() + timeout
         while time.time() < deadline:
