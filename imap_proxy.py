@@ -68,6 +68,7 @@ def open_imap():
                     "password": unquote(parts.password) if parts.password else None,
                 }
                 client = _ProxyIMAP(cfg)
+                logger.info("IMAP: connected via SOCKS proxy %s:%s", cfg["host"], cfg["port"])
                 return client
             logger.info("IMAP: proxy %s not socks, using direct", parts.scheme)
         except Exception as e:

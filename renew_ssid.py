@@ -236,7 +236,7 @@ def _uc_login() -> str | None:
                 otp_input = WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="code"], input[name="otp"]'))
                 )
-                otp = auto_read_otp_sync(timeout=60)
+                otp = auto_read_otp_sync(timeout=120)
                 if otp:
                     otp_input.send_keys(otp)
                     logger.info("UC: OTP submitted")
@@ -958,7 +958,7 @@ async def _camoufox_login() -> str | None:
                         break
                     await asyncio.sleep(3)
                 if otp_el:
-                    otp = await asyncio.to_thread(auto_read_otp_sync, timeout=60)
+                    otp = await asyncio.to_thread(auto_read_otp_sync, timeout=120)
                     if otp:
                         try:
                             await otp_el.fill(otp)
