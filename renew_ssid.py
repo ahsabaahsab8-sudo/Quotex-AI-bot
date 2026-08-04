@@ -88,13 +88,16 @@ def _extract_otp(text: str) -> str | None:
 from imap_proxy import open_imap as _open_imap
 
 
-def auto_read_otp_sync(timeout: int = 120) -> str | None:
+def auto_read_otp_sync(timeout: int = 120, since=None) -> str | None:
     """Read the latest Quotex pincode from Gmail FAST.
 
     Polls the newest messages by sequence number (immune to Gmail's IMAP
     search-index lag for brand-new mail) and checks the FROM header for
     Quotex. Searches All Mail so archived/mislabeled pincodes are still
     found. Each code is consumed exactly once (module-level UID tracker).
+
+    `since` is a naive-UTC datetime; only emails sent after it are accepted,
+    so a stale code from an earlier login attempt is never submitted.
     """
     global _last_otp_uid
     imap_user = os.getenv("IMAP_EMAIL") or os.getenv("QUOTEX_EMAIL")
@@ -115,7 +118,9 @@ def auto_read_otp_sync(timeout: int = 120) -> str | None:
                     break
             except Exception:
                 continue
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=20)
+        lower = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=20)
+        if since is not None and since > lower:
+            lower = since
         seen = set()
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -143,7 +148,7 @@ def auto_read_otp_sync(timeout: int = 120) -> str | None:
                     continue
                 try:
                     sent = parsedate_to_datetime(str(body.get("Date", "")))
-                    if sent.replace(tzinfo=None) < cutoff:
+                    if sent.replace(tzinfo=None) < lower:
                         continue
                 except Exception:
                     pass
@@ -547,6 +552,7 @@ async def _patchright_login() -> str | None:
             await asyncio.sleep(3)
 
             # Fill login form (visible inputs, second set)
+            login_ts = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=10)
             login_result = await page.evaluate(
                 """
                 (args) => {
@@ -581,7 +587,7 @@ async def _patchright_login() -> str | None:
                 try:
                     otp_el = await page.query_selector('input[name="code"], input[name="otp"]')
                     if otp_el:
-                        otp = await asyncio.to_thread(auto_read_otp_sync, timeout=120)
+                        otp = await asyncio.to_thread(auto_read_otp_sync, timeout=120, since=login_ts)
                         if otp:
                             await otp_el.fill(otp)
                             logger.info("Patchright: OTP submitted")
@@ -910,6 +916,7 @@ async def _camoufox_login() -> str | None:
             await asyncio.sleep(3)
 
             # Fill login form (visible inputs, second set)
+            login_ts = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=10)
             login_result = await page.evaluate(
                 """
                 (args) => {
@@ -958,7 +965,7 @@ async def _camoufox_login() -> str | None:
                         break
                     await asyncio.sleep(3)
                 if otp_el:
-                    otp = await asyncio.to_thread(auto_read_otp_sync, timeout=120)
+                    otp = await asyncio.to_thread(auto_read_otp_sync, timeout=120, since=login_ts)
                     if otp:
                         try:
                             await otp_el.fill(otp)
