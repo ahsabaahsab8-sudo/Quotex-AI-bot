@@ -86,12 +86,13 @@ def _extract_otp(text: str) -> str | None:
 
 
 def auto_read_otp_sync(timeout: int = 60) -> str | None:
-    """Read the latest Quotex pincode from Gmail.
+    """Read the latest Quotex pincode from Gmail FAST.
 
-    Searches by RECENCY (last 24h), not UNSEEN: opening the email in the
-    phone's Gmail app marks it read, so an UNSEEN-only search misses it. Each
-    returned code is consumed exactly once (module-level UID tracker), so a
-    stale code is never resubmitted on a later renewal attempt.
+    Only the newest few Quotex emails are inspected each poll (never a full
+    rescan of the last 24h), and already-seen emails are skipped, so a fresh
+    OTP is caught within ~1-2s of arriving instead of re-fetching the whole
+    mailbox. Each code is consumed exactly once (module-level UID tracker),
+    so a stale code is never resubmitted on a later renewal attempt.
     """
     global _last_otp_uid
     imap_user = os.getenv("IMAP_EMAIL") or os.getenv("QUOTEX_EMAIL")
@@ -99,23 +100,30 @@ def auto_read_otp_sync(timeout: int = 60) -> str | None:
     if not imap_pass:
         logger.warning("IMAP_PASSWORD not set")
         return None
+    mail = None
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(imap_user, imap_pass)
         mail.select("inbox")
         since_date = (datetime.now() - timedelta(days=1)).strftime("%d-%b-%Y")
         cutoff = datetime.now() - timedelta(minutes=20)
-        for _ in range(timeout):
+        seen_uids = set()
+        deadline = time.time() + timeout
+        while time.time() < deadline:
             try:
                 _, data = mail.search(None, f'(FROM "quotex" SINCE {since_date})')
             except Exception:
                 data = (None, [b""])
             nums = data[0].split() if data and data[0] else []
-            for num in reversed(nums):
-                if num == _last_otp_uid:
+            for num in reversed(nums[-3:]):  # only the newest 3 messages
+                if num == _last_otp_uid or num in seen_uids:
                     continue
-                _, msg_data = mail.fetch(num, "(BODY.PEEK[])")
-                body = email_lib.message_from_bytes(msg_data[0][1])
+                seen_uids.add(num)
+                try:
+                    _, msg_data = mail.fetch(num, "(BODY.PEEK[])")
+                    body = email_lib.message_from_bytes(msg_data[0][1])
+                except Exception:
+                    continue
                 try:
                     sent = parsedate_to_datetime(str(body.get("Date", "")))
                     if sent.replace(tzinfo=None) < cutoff:
@@ -149,6 +157,12 @@ def auto_read_otp_sync(timeout: int = 60) -> str | None:
     except Exception as e:
         logger.error(f"IMAP OTP read failed: {e}")
         return None
+    finally:
+        if mail is not None:
+            try:
+                mail.logout()
+            except Exception:
+                pass
 
 
 def _uc_login() -> str | None:
