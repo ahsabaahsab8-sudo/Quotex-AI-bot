@@ -23,6 +23,15 @@ SUPPORTED_TIMEFRAMES = [
     1800, 2700, 3600, 7200, 10800, 14400, 86400, 604800,
 ]
 
+# All timeframes Quotex offers, shown to the user regardless of per-pair
+# "active" metadata (which is often wrong/incomplete). The user must pick
+# one that is actually open for the selected pair. In seconds.
+ALL_QUOTEX_TIMEFRAMES = [
+    5, 10, 15,          # seconds
+    60, 120, 300, 600, 900, 1800,   # minutes: 1, 2, 5, 10, 15, 30
+    3600, 14400, 86400,  # hours/days: 1h, 4h, 1D
+]
+
 # Per-pair active timeframe cache: {pair: {"tfs": [...], "ts": epoch}}
 _TIMEFRAME_CACHE: dict[str, dict] = {}
 _TIMEFRAME_CACHE_TTL = 300.0  # 5 minutes

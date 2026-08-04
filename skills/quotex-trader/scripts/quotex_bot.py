@@ -19,7 +19,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 import main as bot_main
 from quotex_adapter import (
     get_active_pairs as adapter_get_active_pairs,
-    get_asset_timeframes as adapter_get_asset_timeframes,
+    ALL_QUOTEX_TIMEFRAMES,
     format_timeframe_label,
     close_quotex_connection,
 )
@@ -135,19 +135,7 @@ async def pair_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pair = query.data.replace("pair_", "")
     display = format_pair_name(pair)
 
-    await query.edit_message_text(f"⏳ Checking active timeframes for *{display}*...", parse_mode="Markdown")
-
-    try:
-        client = await bot_main.get_quotex_connection()
-        tfs = await adapter_get_asset_timeframes(client, pair)
-        await close_quotex_connection()
-    except Exception as e:
-        await query.edit_message_text(f"❌ Failed to connect to Quotex: {e}")
-        return
-
-    if not tfs:
-        await query.edit_message_text(f"❌ No active timeframes found for {display}")
-        return
+    tfs = ALL_QUOTEX_TIMEFRAMES
 
     keyboard, row = [], []
     for tf in tfs:
@@ -161,6 +149,8 @@ async def pair_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text(
         f"📊 *{display}*\n\nSelect a timeframe for AI analysis:\n\n"
+        f"⚠️ *Plz select the timeframe which is Active on Quotex.*\n"
+        f"Selecting wrong one which is not Active may cause the Wrong signal!\n\n"
         f"The AI will study the pattern on the selected timeframe and signal the NEXT candle after the current one ends.",
         reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown"
     )
