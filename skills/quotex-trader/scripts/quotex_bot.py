@@ -343,7 +343,7 @@ def main():
             asyncio.set_event_loop(loop)
     from telegram.request import HTTPXRequest
     request = HTTPXRequest(httpx_kwargs={"timeout": 30})
-    app = Application.builder().token(TOKEN).request(request).build()
+    app = Application.builder().token(TOKEN).request(request).concurrent_updates(True).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(get_signal_menu, pattern="^get_signal$"))
     app.add_handler(CallbackQueryHandler(menu_category, pattern="^cat_"))
