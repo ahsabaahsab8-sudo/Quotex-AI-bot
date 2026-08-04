@@ -85,6 +85,9 @@ def _extract_otp(text: str) -> str | None:
     return None
 
 
+from imap_proxy import open_imap as _open_imap
+
+
 def auto_read_otp_sync(timeout: int = 120) -> str | None:
     """Read the latest Quotex pincode from Gmail FAST.
 
@@ -101,7 +104,7 @@ def auto_read_otp_sync(timeout: int = 120) -> str | None:
         return None
     mail = None
     try:
-        mail = imaplib.IMAP4_SSL("imap.gmail.com")
+        mail = _open_imap()
         mail.login(imap_user, imap_pass)
         folder = "inbox"
         for candidate in ('"[Gmail]/All Mail"', "inbox"):

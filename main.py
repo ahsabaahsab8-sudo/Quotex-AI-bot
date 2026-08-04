@@ -23,6 +23,8 @@ from quotex_adapter import (
     get_asset_payout as adapter_get_asset_payout,
 )
 
+from imap_proxy import open_imap
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -38,7 +40,7 @@ async def auto_otp_callback(message):
         logger.error("IMAP_PASSWORD not set. Cannot auto-read OTP.")
         return None
     try:
-        mail = imaplib.IMAP4_SSL("imap.gmail.com")
+        mail = open_imap()
         mail.login(imap_user, imap_pass)
         mail.select("inbox")
         for _ in range(30):
