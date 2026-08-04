@@ -12,8 +12,6 @@ import os
 import ssl as ssl_lib
 from urllib.parse import urlparse, unquote
 
-import socks
-
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +29,7 @@ class _ProxyIMAP(imaplib.IMAP4_SSL):
         super().__init__(host, port, timeout=timeout)
 
     def _create_socket(self, timeout=None):
+        import socks
         p = self._proxy
         s = socks.socksocket()
         s.set_proxy(
