@@ -11,3 +11,6 @@ _debug_*.py
 debug_*
 startup_test_*
 bot_*.log
+# Gmail OAuth secrets — do not commit
+client_secret_*.json
+gmail_token.json

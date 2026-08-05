@@ -1,7 +1,7 @@
 """Adapter using pyquotex with auto-renewing SSID.
 
 Primary renewal: API-based (fast, no browser).
-Fallback: Playwright headless login + IMAP OTP.
+Fallback: Playwright headless login + Gmail API OTP.
 Proactive watchdog refreshes token every 20 min before expiry."""
 
 import os
@@ -280,8 +280,8 @@ async def get_quotex_connection():
         new_token = None
 
     if not new_token:
-        raise ConnectionError("Auto-renew failed. Ensure QUOTEX_EMAIL / QUOTEX_PASSWORD / IMAP_PASSWORD "
-                              "are set in .env")
+        raise ConnectionError("Auto-renew failed. Ensure QUOTEX_EMAIL / QUOTEX_PASSWORD "
+                              "and the Gmail API token (gmail_token.json) are set")
 
     session = load_session()
     _client, err = await _connect_with_retries(email, new_token, session)

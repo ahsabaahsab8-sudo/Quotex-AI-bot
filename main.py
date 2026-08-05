@@ -8,8 +8,6 @@ import requests
 import pandas as pd
 import numpy as np
 import ta
-import imaplib
-import email as email_lib
 import re
 from datetime import datetime, timezone, timedelta, time as dt_time
 from dotenv import load_dotenv
@@ -23,7 +21,7 @@ from quotex_adapter import (
     get_asset_payout as adapter_get_asset_payout,
 )
 
-from imap_proxy import open_imap
+from gmail_otp import fetch_latest_otp
 
 load_dotenv()
 
@@ -34,37 +32,11 @@ logger = logging.getLogger(__name__)
 # ─── AUTO OTP READER FROM EMAIL ──────────────────────────────────────
 
 async def auto_otp_callback(message):
-    imap_user = os.getenv("IMAP_EMAIL") or os.getenv("QUOTEX_EMAIL")
-    imap_pass = os.getenv("IMAP_PASSWORD")
-    if not imap_pass:
-        logger.error("IMAP_PASSWORD not set. Cannot auto-read OTP.")
-        return None
-    try:
-        mail = open_imap()
-        mail.login(imap_user, imap_pass)
-        mail.select("inbox")
-        for _ in range(30):
-            _, data = mail.search(None, '(FROM "quotex" UNSEEN)')
-            for num in reversed(data[0].split()):
-                _, msg_data = mail.fetch(num, "(RFC822)")
-                body = email_lib.message_from_bytes(msg_data[0][1])
-                if body.is_multipart():
-                    text = ""
-                    for part in body.walk():
-                        if part.get_content_type() == "text/plain":
-                            text = part.get_payload(decode=True).decode(errors='ignore')
-                            break
-                else:
-                    text = body.get_payload(decode=True).decode(errors='ignore')
-                match = re.search(r'\b(\d{4,6})\b', text)
-                if match:
-                    return match.group(1)
-            await asyncio.sleep(1)
-        logger.warning("OTP not found in email after 30s")
-        return None
-    except Exception as e:
-        logger.error(f"IMAP OTP read failed: {e}")
-        return None
+    otp = await asyncio.to_thread(fetch_latest_otp, timeout=60)
+    if otp:
+        return otp
+    logger.warning("Gmail API: no Quotex OTP found within 60s")
+    return None
 
 
 # ─── QUOTEX CONNECTION ───────────────────────────────────────────────

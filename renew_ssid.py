@@ -4,12 +4,9 @@ import os
 import json
 import asyncio
 import logging
-import imaplib
-import email as email_lib
 import re
 import time
 from datetime import datetime, timedelta, timezone
-from email.utils import parsedate_to_datetime
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,8 +16,8 @@ logger = logging.getLogger(__name__)
 SESSION_FILE = os.path.join(os.path.dirname(__file__), "session.json")
 MAX_RETRIES = 3
 
-# UID of the last OTP email consumed by auto_read_otp_sync, so a stale code
-# is never resubmitted on a later renewal attempt.
+# UID/message-id of the last OTP email consumed, so a stale code is never
+# resubmitted on a later renewal attempt. Tracks message-ids via gmail_otp.
 _last_otp_uid = None
 
 
@@ -85,106 +82,18 @@ def _extract_otp(text: str) -> str | None:
     return None
 
 
-from imap_proxy import open_imap as _open_imap
+from gmail_otp import fetch_latest_otp
 
 
 def auto_read_otp_sync(timeout: int = 120, since=None) -> str | None:
-    """Read the latest Quotex pincode from Gmail FAST.
+    """Read the latest Quotex pincode from Gmail FAST via the Gmail API.
 
-    Polls the newest messages by sequence number (immune to Gmail's IMAP
-    search-index lag for brand-new mail) and checks the FROM header for
-    Quotex. Searches All Mail so archived/mislabeled pincodes are still
-    found. Each code is consumed exactly once (module-level UID tracker).
-
-    `since` is a naive-UTC datetime; only emails sent after it are accepted,
-    so a stale code from an earlier login attempt is never submitted.
+    Uses OAuth2 (client_secret JSON + gmail_token.json) instead of IMAP, so
+    no app password is needed. Only the newest genuine 'Authentication
+    pincode' email sent after `since` is accepted, and each code is consumed
+    exactly once (module-level message-id tracker in gmail_otp).
     """
-    global _last_otp_uid
-    imap_user = os.getenv("IMAP_EMAIL") or os.getenv("QUOTEX_EMAIL")
-    imap_pass = os.getenv("IMAP_PASSWORD")
-    if not imap_pass:
-        logger.warning("IMAP_PASSWORD not set")
-        return None
-    mail = None
-    try:
-        mail = _open_imap()
-        mail.login(imap_user, imap_pass)
-        folder = "inbox"
-        for candidate in ('"[Gmail]/All Mail"', "inbox"):
-            try:
-                status, _ = mail.select(candidate)
-                if status == "OK":
-                    folder = candidate
-                    break
-            except Exception:
-                continue
-        lower = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=20)
-        if since is not None and since > lower:
-            lower = since
-        seen = set()
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            try:
-                status, count_data = mail.select(folder)
-                if status != "OK":
-                    time.sleep(1)
-                    continue
-                count = int(count_data[0])
-            except Exception:
-                time.sleep(1)
-                continue
-            for seq in range(max(1, count - 4), count + 1):  # newest 5
-                if seq in seen:
-                    continue
-                seen.add(seq)
-                try:
-                    status, msg_data = mail.fetch(str(seq), "(BODY.PEEK[])")
-                    if status != "OK" or not msg_data or msg_data[0] is None:
-                        continue
-                    body = email_lib.message_from_bytes(msg_data[0][1])
-                except Exception:
-                    continue
-                if "quotex" not in str(body.get("From", "")).lower():
-                    continue
-                try:
-                    sent = parsedate_to_datetime(str(body.get("Date", "")))
-                    if sent.replace(tzinfo=None) < lower:
-                        continue
-                except Exception:
-                    pass
-                text = ""
-                if body.is_multipart():
-                    for part in body.walk():
-                        if part.get_content_type() == "text/html":
-                            text = part.get_payload(decode=True).decode(errors='ignore')
-                            break
-                    if not text:
-                        for part in body.walk():
-                            if part.get_content_type() == "text/plain":
-                                text = part.get_payload(decode=True).decode(errors='ignore')
-                                break
-                else:
-                    text = body.get_payload(decode=True).decode(errors='ignore')
-                otp = _extract_otp(text)
-                if otp:
-                    _last_otp_uid = seq
-                    try:
-                        mail.store(str(seq), "+FLAGS", "\\Seen")
-                    except Exception:
-                        pass
-                    return otp
-            time.sleep(1)
-        logger.warning(f"OTP not found after {timeout}s")
-        return None
-    except Exception as e:
-        logger.error(f"IMAP OTP read failed: {e}")
-        return None
-    finally:
-        if mail is not None:
-            try:
-                mail.logout()
-            except Exception:
-                pass
+    return fetch_latest_otp(timeout=timeout, since=since)
 
 
 def _uc_login() -> str | None:
@@ -949,7 +858,7 @@ async def _camoufox_login() -> str | None:
             await asyncio.sleep(7)
 
             # If Quotex demands a verification code (new IP login), the page
-            # stays on /sign-in. Auto-fill it from Gmail via IMAP OTP reader.
+            # stays on /sign-in. Auto-fill it from Gmail via Gmail API OTP reader.
             if "/sign-in" in page.url.lower():
                 logger.info("Camoufox: checking for OTP input...")
                 otp_el = None
