@@ -1122,10 +1122,10 @@ If you REVERSE, provide your own direction and confidence.
 """
 
 
-# ─── AI: GEMINI 3.6 FLASH ─────────────────────────────────────────────
+# ─── AI: MIMO V2.5 VIA ZEN (was Gemini 3.6 Flash) ─────────────────────
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = "gemini-3.6-flash"
+MIMO_ZEN_KEY = os.getenv("MIMO_ZEN_KEY", "sk-9wvf1O4OyqST9iQzklxU2PQOPxlw8I0hKEtakaDKgJNg6wOFrRvRY0146DJsdaoD")
+mimo_client = OpenAI(base_url="https://opencode.ai/zen/v1", api_key=MIMO_ZEN_KEY, timeout=120.0)
 
 
 def _coerce_dict(data):
@@ -1137,23 +1137,26 @@ def _coerce_dict(data):
 
 
 async def query_gemini_analysis(tech_data: dict) -> dict | None:
-    if not GEMINI_API_KEY:
-        logger.error("GEMINI_API_KEY not set")
-        return None
     data_json = json.dumps([tech_data], indent=2)
     prompt = TRADING_PROMPT_TEMPLATE.format(data_json=data_json)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2}}
     try:
-        resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=120)
-        if resp.status_code == 200:
-            text = resp.json()['candidates'][0]['content']['parts'][0]['text'].strip()
-            text = text.replace("```json", "").replace("```", "").strip()
-            return _coerce_dict(json.loads(text))
-        logger.error(f"Gemini error {resp.status_code}")
-        return None
+        completion = await asyncio.to_thread(
+            mimo_client.chat.completions.create,
+            model="mimo-v2.5-free",
+            messages=[
+                {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2, max_tokens=8192
+        )
+        text = completion.choices[0].message.content.strip()
+        if not text:
+            logger.warning("MiMo returned empty response")
+            return None
+        text = text.replace("```json", "").replace("```", "").strip()
+        return _coerce_dict(json.loads(text))
     except Exception as e:
-        logger.error(f"Gemini failed: {e}")
+        logger.error(f"MiMo failed: {e}")
         return None
 
 
@@ -1445,7 +1448,7 @@ async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: 
     votes = {"BUY": 0, "SELL": 0}
     confidences = []
     reasons = []
-    model_names = ["GLM 5.2", "DeepSeek V4 Flash", "Gemini 3.6 Flash"]
+    model_names = ["GLM 5.2", "DeepSeek V4 Flash", "MiMo V2.5"]
     model_details = []
 
     for i, (name, res) in enumerate(zip(model_names, results)):
