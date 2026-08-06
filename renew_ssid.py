@@ -14,7 +14,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 SESSION_FILE = os.path.join(os.path.dirname(__file__), "session.json")
-MAX_RETRIES = 3
+MAX_RETRIES = 6
 
 # UID/message-id of the last OTP email consumed, so a stale code is never
 # resubmitted on a later renewal attempt. Tracks message-ids via gmail_otp.
@@ -716,7 +716,7 @@ def _ensure_socks_relay() -> dict | None:
     return _parse_proxy(proxy_env)
 
 
-async def _camoufox_login() -> str | None:
+async def _camoufox_login(headed: bool = False) -> str | None:
     """Login via Camoufox (custom Firefox build with C++ stealth).
     Works on both Windows and Linux. Bypasses Cloudflare reliably."""
     email = os.getenv("QUOTEX_EMAIL")
@@ -745,7 +745,7 @@ async def _camoufox_login() -> str | None:
             humanize=True,
             geoip=False,
             disable_coop=True,
-            headless=True,
+            headless=not headed,
             proxy=proxy_cfg,
             firefox_user_prefs={
                 # Skip glxtest/GPU detection — missing glxtest binary SIGSEGVs
@@ -824,7 +824,39 @@ async def _camoufox_login() -> str | None:
 
             await asyncio.sleep(3)
 
-            # Fill login form (visible inputs, second set)
+            # The proxy is a rotating residential proxy: some exit IPs are
+            # geo-blocked by Quotex ("not available in your region"). When that
+            # happens the login form never renders. Detect it and fail fast so
+            # renew_ssid retries on a NEW browser = NEW exit IP.
+            try:
+                body_text = await page.evaluate("() => document.body ? document.body.innerText : ''")
+                if "not available in your region" in body_text:
+                    logger.warning("Camoufox: exit IP geo-blocked by Quotex, retrying on new IP...")
+                    return None
+            except Exception:
+                pass
+
+            # Wait for the login form to be FULLY rendered and VISIBLE before
+            # filling. domcontentloaded does NOT mean the SPA form exists yet —
+            # filling too early returns "no inputs found" and login stalls.
+            # A hidden always-present input set is ignored by state="visible".
+            try:
+                await page.wait_for_selector(
+                    'input[name="email"]', state="visible", timeout=60000
+                )
+                await page.wait_for_selector(
+                    'input[name="password"]', state="visible", timeout=60000
+                )
+                logger.info("Camoufox: login form rendered and visible")
+            except Exception:
+                logger.warning("Camoufox: login form never appeared, continuing anyway")
+
+            # Fill login form (visible inputs, second set) and submit via
+            # form.requestSubmit() — this triggers Quotex's QXvId.submit handler,
+            # which is what actually sends the login + OTP email. A plain
+            # b.click() on the button does NOT fire that handler (verified:
+            # clicking produced no OTP email). React-controlled inputs ignore
+            # plain .value, so use the native value setter + input event.
             login_ts = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=10)
             login_result = await page.evaluate(
                 """
@@ -834,16 +866,30 @@ async def _camoufox_login() -> str | None:
                     if (!emails.length || !passes.length) return "no inputs found";
                     var email = emails.length > 1 ? emails[1] : emails[0];
                     var pass = passes.length > 1 ? passes[1] : passes[0];
-                    email.value = args[0];
-                    pass.value = args[1];
-                    email.dispatchEvent(new Event('input', { bubbles: true }));
-                    pass.dispatchEvent(new Event('input', { bubbles: true }));
+                    if (!email.offsetParent || !pass.offsetParent) return "inputs not visible";
+                    var setVal = (el, value) => {
+                        var proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype
+                                                            : HTMLInputElement.prototype;
+                        var desc = Object.getOwnPropertyDescriptor(proto, 'value');
+                        desc.set.call(el, value);
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                    };
+                    setVal(email, args[0]);
+                    setVal(pass, args[1]);
+                    var form = email.closest('form');
+                    if (form && form.requestSubmit) {
+                        try {
+                            form.requestSubmit();
+                            return "requestSubmit";
+                        } catch (e) {}
+                    }
                     var buttons = document.querySelectorAll('button');
-                    for (var i = 0; i < buttons.length; i++) {
+                    for (var i = buttons.length - 1; i >= 0; i--) {
                         var b = buttons[i];
-                        if (b.textContent.trim() === "Sign in" && b.offsetParent !== null) {
+                        var t = (b.textContent || '').trim().toLowerCase();
+                        if (b.offsetParent !== null && b.type === 'submit') {
                             b.click();
-                            return "clicked Sign in";
+                            return "clicked submit button";
                         }
                     }
                     return "Sign in button not found";
@@ -855,48 +901,96 @@ async def _camoufox_login() -> str | None:
             if login_result == "no inputs found":
                 logger.info("Camoufox: current URL: %s", page.url)
                 logger.info("Camoufox: page title: %s", await page.title())
-            await asyncio.sleep(7)
+
+            # If requestSubmit fell through to a plain button click, the login
+            # may not have fired Quotex's handler. Retry via requestSubmit on
+            # the form directly after a short delay.
+            if login_result == "clicked submit button":
+                await asyncio.sleep(1)
+                try:
+                    resub = await page.evaluate(
+                        """
+                        () => {
+                            var inputs = document.querySelectorAll('input[name="email"]');
+                            if (!inputs.length) return null;
+                            var form = inputs[inputs.length - 1].closest('form');
+                            if (form && form.requestSubmit) { form.requestSubmit(); return "requestSubmit"; }
+                            return null;
+                        }
+                        """
+                    )
+                    if resub:
+                        login_result = resub
+                        logger.info("Camoufox: re-submitted via requestSubmit")
+                except Exception:
+                    pass
+
+            # Start reading Gmail for the OTP IMMEDIATELY, in parallel with
+            # waiting for the OTP field. The email arrives ~50s after submit;
+            # starting late adds a huge delay and the code may already be old.
+            otp_task = asyncio.create_task(
+                asyncio.to_thread(auto_read_otp_sync, timeout=150, since=login_ts)
+            )
 
             # If Quotex demands a verification code (new IP login), the page
             # stays on /sign-in. Auto-fill it from Gmail via Gmail API OTP reader.
-            if "/sign-in" in page.url.lower():
-                logger.info("Camoufox: checking for OTP input...")
-                otp_el = None
-                for _ in range(6):  # up to ~18s for the OTP field to appear
-                    try:
-                        otp_el = await page.query_selector(
-                            'input[name="code"], input[name="otp"], '
-                            'input[autocomplete="one-time-code"]'
-                        )
-                    except Exception:
-                        otp_el = None
-                    if otp_el:
-                        break
-                    await asyncio.sleep(3)
+            # Only a VISIBLE OTP input counts — the DOM contains a hidden
+            # always-present input[name="code"] that must be ignored (same
+            # two-set layout as the login form).
+            otp_el = None
+            for _ in range(35):  # up to ~105s for the OTP field to appear
+                if "/trade" in page.url.lower():
+                    break
+                try:
+                    handle = await page.evaluate_handle(
+                        """
+                        () => {
+                            var els = document.querySelectorAll(
+                                'input[name="code"], input[name="otp"], ' +
+                                'input[autocomplete="one-time-code"]'
+                            );
+                            for (var i = els.length - 1; i >= 0; i--) {
+                                var el = els[i];
+                                if (el.offsetParent !== null) return el;
+                            }
+                            return null;
+                        }
+                        """
+                    )
+                    otp_el = await handle.as_element() if handle else None
+                except Exception:
+                    otp_el = None
                 if otp_el:
-                    otp = await asyncio.to_thread(auto_read_otp_sync, timeout=120, since=login_ts)
-                    if otp:
+                    break
+                await asyncio.sleep(3)
+            if otp_el:
+                logger.info("Camoufox: OTP field appeared, reading code from Gmail...")
+                try:
+                    otp = await asyncio.wait_for(otp_task, timeout=30)
+                except Exception:
+                    otp = None
+                if otp:
+                    try:
+                        await otp_el.fill(otp)
+                        logger.info("Camoufox: OTP filled (%s)", otp)
+                        # The OTP form needs an explicit submit (button or
+                        # Enter), otherwise Quotex never processes the code.
                         try:
-                            await otp_el.fill(otp)
-                            logger.info("Camoufox: OTP submitted")
-                            # The OTP form needs an explicit submit (button or
-                            # Enter), otherwise Quotex never processes the code.
-                            try:
-                                submit = await page.query_selector('button[type="submit"]')
-                                if submit:
-                                    await submit.click()
-                                    logger.info("Camoufox: OTP submit button clicked")
-                                else:
-                                    await page.keyboard.press("Enter")
-                                    logger.info("Camoufox: pressed Enter on OTP form")
-                            except Exception as e:
-                                logger.warning("Camoufox: OTP submit click failed (%s), pressing Enter", e)
+                            submit = await page.query_selector('button[type="submit"]')
+                            if submit:
+                                await submit.click()
+                                logger.info("Camoufox: OTP submit button clicked")
+                            else:
                                 await page.keyboard.press("Enter")
-                            await asyncio.sleep(10)
+                                logger.info("Camoufox: pressed Enter on OTP form")
                         except Exception as e:
-                            logger.warning("Camoufox: OTP fill failed: %s", e)
-                    else:
-                        logger.warning("Camoufox: OTP input present but no code read from Gmail")
+                            logger.warning("Camoufox: OTP submit click failed (%s), pressing Enter", e)
+                            await page.keyboard.press("Enter")
+                        await asyncio.sleep(10)
+                    except Exception as e:
+                        logger.warning("Camoufox: OTP fill failed: %s", e)
+                else:
+                    logger.warning("Camoufox: OTP input present but no code read from Gmail")
 
             # Navigate to trade page if not already there
             if "/trade" not in page.url:
@@ -964,13 +1058,13 @@ async def _camoufox_login() -> str | None:
     return token
 
 
-async def renew_ssid(force_playwright: bool = False) -> str | None:
-    """Renew SSID: Camoufox (primary), then Kameleo -> undetected-chromedriver,
-    with OpenClaw as a final fallback.
+async def renew_ssid(force_playwright: bool = False, headed: bool = False) -> str | None:
+    """Renew SSID via Camoufox ONLY (routed through the proxy from .env).
 
-    Camoufox is the main token-extraction path (custom Firefox build that
-    bypasses Cloudflare), routing through the Quotex proxy from .env.
-    OpenClaw (openclaw_renewal.renew_via_openclaw) remains only as a fallback.
+    The proxy is a rotating residential proxy, so some attempts land on exit
+    IPs that Quotex geo-blocks ("not available in your region"). Each Camoufox
+    launch gets a fresh exit IP, so we simply retry a few times until one isn't
+    blocked. OpenClaw remains only as a final fallback.
     """
     email = os.getenv("QUOTEX_EMAIL")
     password = os.getenv("QUOTEX_PASSWORD")
@@ -980,42 +1074,21 @@ async def renew_ssid(force_playwright: bool = False) -> str | None:
 
     last_err = None
     for attempt in range(1, MAX_RETRIES + 1):
-        logger.info("SSID renewal attempt %d/%d...", attempt, MAX_RETRIES)
-
-        # PRIMARY: Camoufox (works on both Windows and Linux)
+        logger.info("SSID renewal attempt %d/%d (Camoufox via proxy)...", attempt, MAX_RETRIES)
         try:
-            token = await _camoufox_login()
+            token = await _camoufox_login(headed=headed)
             if token:
                 return token
         except Exception as e:
             last_err = e
             logger.warning("Camoufox attempt %d failed: %s", attempt, e)
 
-        # Kameleo fallback (Windows only)
-        if not _is_linux():
-            try:
-                token = await _kameleo_login()
-                if token:
-                    return token
-            except Exception as e:
-                last_err = e
-                logger.warning("Kameleo attempt %d failed: %s", attempt, e)
-
-        # Fallback to undetected-chromedriver
-        try:
-            token = await asyncio.to_thread(_uc_login)
-            if token:
-                return token
-        except Exception as e:
-            last_err = e
-            logger.warning("UC fallback attempt %d failed: %s", attempt, e)
-
         if attempt < MAX_RETRIES:
-            wait = attempt * 10
-            logger.info("Retrying in %ds...", wait)
+            wait = 8
+            logger.info("Retrying in %ds (new exit IP)...", wait)
             await asyncio.sleep(wait)
 
-    # FINAL FALLBACK: OpenClaw agent (only reached if all above failed)
+    # FINAL FALLBACK: OpenClaw agent (only reached if Camoufox never succeeded)
     try:
         from openclaw_renewal import renew_via_openclaw
         token = await renew_via_openclaw()
@@ -1035,7 +1108,9 @@ async def renew_ssid_playwright(headless: bool = True) -> str | None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    token = asyncio.run(renew_ssid())
+    import sys
+    headed = "--headed" in sys.argv
+    token = asyncio.run(renew_ssid(headed=headed))
     if token:
         print(f"\nToken: {token}")
     else:

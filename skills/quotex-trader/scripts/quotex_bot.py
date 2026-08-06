@@ -231,7 +231,25 @@ async def timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parse_mode="Markdown"
         )
 
-    ai_result = await bot_main.query_all_models(tech_data["summary"], pair_code=pair, original_pair=original_pair if pair != original_pair else None)
+    chart_b64 = None
+    if os.getenv("ENABLE_CHART_CAPTURE", "1") == "1":
+        try:
+            import chart_capture
+            logger.info(f"Capturing live chart for {pair} (tf={tf}s)...")
+            chart_b64 = await chart_capture.capture_chart_image(pair, timeframe_seconds=tf, timeout=60.0)
+            if chart_b64:
+                logger.info(f"Chart captured for {pair} ({len(chart_b64)} b64 chars) -> attached to Diffusion Gemma")
+            else:
+                logger.warning(f"Chart capture failed/blank for {pair}; proceeding without image")
+        except Exception as e:
+            logger.warning(f"Chart capture error for {pair}: {e}")
+
+    ai_result = await bot_main.query_all_models(
+        tech_data["summary"],
+        pair_code=pair,
+        original_pair=original_pair if pair != original_pair else None,
+        chart_b64=chart_b64,
+    )
     await close_quotex_connection()
 
     if not ai_result or not isinstance(ai_result, dict):

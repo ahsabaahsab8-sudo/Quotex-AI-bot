@@ -17,13 +17,13 @@ client = OpenAI(
 
 async def test_glm():
     try:
-        print("Querying z-ai/glm-5.2...")
+        print("Querying google/diffusiongemma-26b-a4b-it...")
         completion = client.chat.completions.create(
-            model="z-ai/glm-5.2",
+            model="google/diffusiongemma-26b-a4b-it",
             messages=[
                 {"role": "user", "content": "Return a JSON object with key 'test' and value 'hello'."}
             ],
-            response_format={"type": "json_object"}
+            response_format={"type": "json_schema", "json_schema": {"name": "test_response", "strict": True, "schema": {"type": "object", "properties": {"test": {"type": "string"}}, "required": ["test"], "additionalProperties": False}}}
         )
         print("Success! Response:")
         print(completion.choices[0].message.content)

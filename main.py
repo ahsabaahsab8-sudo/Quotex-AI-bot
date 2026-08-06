@@ -1187,19 +1187,89 @@ NVIDIA_API_KEY = "nvapi-bvOD-7s5QwDcM4mv-siKWeu4EESFFKset4W2SFd7WDgX9kcdLH1BeooP
 nvidia_client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=NVIDIA_API_KEY)
 
 
-async def query_glm_analysis(tech_data: dict) -> dict | None:
+DIFFUSION_GEMMA_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "direction": {"type": "string", "enum": ["BUY", "SELL", "SKIP"]},
+        "confidence": {"type": "integer"},
+        "martingale_recommendation": {"type": "string"},
+        "chain_of_thought_reasoning": {
+            "type": "object",
+            "properties": {
+                "step_1_tier_1": {"type": "string"},
+                "step_2_tier_2": {"type": "string"},
+                "step_3_tier_3": {"type": "string"}
+            },
+            "required": ["step_1_tier_1", "step_2_tier_2", "step_3_tier_3"],
+            "additionalProperties": False
+        },
+        "analysis": {
+            "type": "object",
+            "properties": {
+                "tier_1_summary": {"type": "string"},
+                "tier_2_summary": {"type": "string"},
+                "tier_3_summary": {"type": "string"}
+            },
+            "required": ["tier_1_summary", "tier_2_summary", "tier_3_summary"],
+            "additionalProperties": False
+        },
+        "chart_analysis": {
+            "type": "object",
+            "properties": {
+                "visual_trend": {"type": "string"},
+                "key_levels_seen": {"type": "string"},
+                "pattern_at_price": {"type": "string"},
+                "telemetry_agreement": {"type": "string"},
+                "visual_signal_override": {"type": "string"}
+            },
+            "required": ["visual_trend", "key_levels_seen", "pattern_at_price", "telemetry_agreement", "visual_signal_override"],
+            "additionalProperties": False
+        },
+        "reason": {"type": "string"}
+    },
+    "required": ["direction", "confidence", "martingale_recommendation", "chain_of_thought_reasoning", "analysis", "reason"],
+    "additionalProperties": False
+}
+
+
+CHART_IMAGE_PROMPT_SECTION = """
+### CHART IMAGE ANALYSIS (VISUAL CONFIRMATION)
+A live screenshot of the candlestick chart for this asset is attached to this message.
+Use it as a visual confirmation layer on top of the telemetry:
+- Visually confirm the trend direction and EMA alignment you derive from the telemetry.
+- Note the candlestick pattern forming at the current price level.
+- Look for visible support/resistance levels, round-number magnets, or stop-hunt spikes.
+- If the chart clearly contradicts the telemetry, lower your confidence accordingly.
+Fill in the "chart_analysis" block in your output:
+  visual_trend (UP/DOWN/SIDEWAYS), key_levels_seen, pattern_at_price,
+  telemetry_agreement (CONFIRMS/CONTRADICTS/NEUTRAL), visual_signal_override (BUY/SELL/NEUTRAL).
+"""
+
+
+async def query_glm_analysis(tech_data: dict, chart_b64: str | None = None) -> dict | None:
     data_json = json.dumps([tech_data], indent=2)
     prompt = TRADING_PROMPT_TEMPLATE.format(data_json=data_json)
+    if chart_b64:
+        prompt = prompt.replace(
+            "### TIMEFRAME CONTEXT",
+            CHART_IMAGE_PROMPT_SECTION + "\n\n### TIMEFRAME CONTEXT"
+        )
+        user_content = [
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{chart_b64}"}},
+            {"type": "text", "text": prompt},
+        ]
+    else:
+        user_content = prompt
     try:
         completion = await asyncio.to_thread(
             nvidia_client.chat.completions.create,
-            model="z-ai/glm-5.2",
+            model="google/diffusiongemma-26b-a4b-it",
             messages=[
                 {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'."},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": user_content}
             ],
             temperature=0.2, top_p=0.7, max_tokens=8192,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_schema", "json_schema": {"name": "trading_analysis", "strict": True, "schema": DIFFUSION_GEMMA_RESPONSE_SCHEMA}}
         )
         text = completion.choices[0].message.content.strip()
         text = text.replace("```json", "").replace("```", "").strip()
@@ -1405,13 +1475,13 @@ def get_pair_category(pair_code: str) -> str:
     return "REAL"
 
 
-async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: str = None) -> dict:
+async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: str = None, chart_b64: str | None = None) -> dict:
     summary = tech_data.get("summary", tech_data) if isinstance(tech_data, dict) else tech_data
 
-    logger.info(f"Voting system: Running 3 models for {pair_code}")
+    logger.info(f"Voting system: Running 3 models for {pair_code}" + (" (with chart image for Diffusion Gemma)" if chart_b64 else ""))
 
     results = await asyncio.gather(
-        query_glm_analysis(summary),
+        query_glm_analysis(summary, chart_b64=chart_b64),
         query_deepseek_vote(summary),
         query_gemini_analysis(summary),
         return_exceptions=True
