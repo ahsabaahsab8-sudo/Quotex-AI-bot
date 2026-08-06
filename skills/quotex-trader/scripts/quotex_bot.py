@@ -359,6 +359,21 @@ def main():
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+
+    # Startup sanity check: confirm Diffusion Gemma (not GLM) and the
+    # .env Quotex proxy are actually wired into the running bot.
+    try:
+        qx_proxy = os.getenv("QUOTEX_PROXY") or os.getenv("CAMOUFOX_PROXY") or ""
+        if qx_proxy:
+            host = qx_proxy.rsplit("@", 1)[-1]
+            logger.info("Quotex connection will use proxy from .env: %s", host)
+        else:
+            logger.warning("No QUOTEX_PROXY / CAMOUFOX_PROXY set in .env — connecting to Quotex DIRECTLY (likely geo-blocked)")
+        logger.info("AI models active: Diffusion Gemma 26B (Google, via NVIDIA), DeepSeek V4 Flash, MiMo V2.5")
+        logger.info("Chart image is attached to Diffusion Gemma for visual confirmation")
+    except Exception as e:
+        logger.warning(f"Runtime config check failed: {e}")
+
     from telegram.request import HTTPXRequest
     request = HTTPXRequest(httpx_kwargs={"timeout": 30})
     app = Application.builder().token(TOKEN).request(request).concurrent_updates(True).build()

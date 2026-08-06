@@ -974,7 +974,7 @@ Check only TIER 1 factors. If they don't align, output SKIP. Only PASS if setup 
 """
 
 
-# ─── PROMPT 3: GLM ELITE ANALYST (20-Factor Analysis) ─────────────────
+# ─── PROMPT 3: DIFFUSION GEMMA ELITE ANALYST (20-Factor Analysis) ────
 
 ANALYST_PROMPT_TEMPLATE = """
 You are an ELITE QUOTEX OTC ALGORITHMIC TRADER and RISK MANAGER. Your job is to survive, not to gamble.
@@ -1181,7 +1181,7 @@ async def query_step_analysis(tech_data: dict, retries: int = 2) -> dict | None:
     return None
 
 
-# ─── AI: GLM VIA NVIDIA ───────────────────────────────────────────────
+# ─── AI: DIFFUSION GEMMA (GOOGLE) VIA NVIDIA ──────────────────────────
 
 NVIDIA_API_KEY = "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"
 nvidia_client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=NVIDIA_API_KEY)
@@ -1275,8 +1275,13 @@ async def query_glm_analysis(tech_data: dict, chart_b64: str | None = None) -> d
         text = text.replace("```json", "").replace("```", "").strip()
         return _coerce_dict(json.loads(text))
     except Exception as e:
-        logger.error(f"GLM failed: {e}")
+        logger.error(f"Diffusion Gemma failed: {e}")
         return None
+
+
+# Clear alias: Diffusion Gemma (Google) is the model behind query_glm_analysis.
+# Kept backwards-compatible so test/scratch scripts calling query_glm_analysis still work.
+query_diffusion_gemma_analysis = query_glm_analysis
 
 
 # ─── AI: CLAUDE OPUS 5 ────────────────────────────────────────────────
@@ -1481,7 +1486,7 @@ async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: 
     logger.info(f"Voting system: Running 3 models for {pair_code}" + (" (with chart image for Diffusion Gemma)" if chart_b64 else ""))
 
     results = await asyncio.gather(
-        query_glm_analysis(summary, chart_b64=chart_b64),
+        query_diffusion_gemma_analysis(summary, chart_b64=chart_b64),
         query_deepseek_vote(summary),
         query_gemini_analysis(summary),
         return_exceptions=True
@@ -1490,7 +1495,7 @@ async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: 
     votes = {"BUY": 0, "SELL": 0}
     confidences = []
     reasons = []
-    model_names = ["GLM 5.2", "DeepSeek V4 Flash", "MiMo V2.5"]
+    model_names = ["Diffusion Gemma 26B", "DeepSeek V4 Flash", "MiMo V2.5"]
     model_details = []
 
     for i, (name, res) in enumerate(zip(model_names, results)):

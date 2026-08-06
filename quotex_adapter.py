@@ -67,8 +67,44 @@ def load_session() -> dict | None:
     return None
 
 
+def _patch_check_connect_timeout() -> None:
+    """Widen pyquotex's post-connect auth check.
+
+    ``Quotex.check_connect()`` waits only ~2s for ``auth_status`` to become
+    AUTHENTICATED. Over a slow proxy the server sends ``s_authorization``
+    (the SUCCESS frame) well past that window, so ``connect()`` returns
+    "Websocket connection rejected." even for a VALID token (verified: the
+    token authorizes fine, just 2-3s late). Patch the staticmethod to wait up
+    to 30s, returning True only when actually AUTHENTICATED and failing fast
+    on an explicit reject.
+    """
+    from pyquotex.global_value import AuthStatus
+    from pyquotex.stable_api import Quotex as _PyQuotex
+    if getattr(_patch_check_connect_timeout, "_patched", False):
+        return
+
+    from pyquotex._api._waits import wait_until
+
+    @staticmethod
+    async def _check_connect_long(state):
+        try:
+            await wait_until(
+                lambda: state.auth_status != AuthStatus.NOT_AUTHENTICATED,
+                timeout=30,
+                poll_interval=0.25,
+            )
+        except asyncio.TimeoutError:
+            pass
+        return state.auth_status == AuthStatus.AUTHENTICATED
+
+    _PyQuotex._check_connect = _check_connect_long
+    _patch_check_connect_timeout._patched = True
+    logger.info("pyquotex: widened connect auth timeout to 30s")
+
+
 async def _connect_with_token(email, token, session):
     from pyquotex.stable_api import Quotex
+    _patch_check_connect_timeout()
     proxy_str = os.getenv("QUOTEX_PROXY") or os.getenv("TELEGRAM_PROXY") or ""
     proxies = None
     if proxy_str:

@@ -836,20 +836,33 @@ async def _camoufox_login(headed: bool = False) -> str | None:
             except Exception:
                 pass
 
-            # Wait for the login form to be FULLY rendered and VISIBLE before
-            # filling. domcontentloaded does NOT mean the SPA form exists yet —
-            # filling too early returns "no inputs found" and login stalls.
-            # A hidden always-present input set is ignored by state="visible".
-            try:
-                await page.wait_for_selector(
-                    'input[name="email"]', state="visible", timeout=60000
-                )
-                await page.wait_for_selector(
-                    'input[name="password"]', state="visible", timeout=60000
-                )
-                logger.info("Camoufox: login form rendered and visible")
-            except Exception:
-                logger.warning("Camoufox: login form never appeared, continuing anyway")
+            # Wait for the login form to be FULLY rendered AND React hydrated
+            # before filling. domcontentloaded does NOT mean the SPA form is
+            # interactive yet — filling or submitting too early (before React
+            # attaches QXvId.submit) means NO login request is sent at all.
+            # state="visible" is unreliable here (proxy + Cloudflare makes the
+            # form render 60-75s late), so poll for the form's submit button
+            # and then give React a few extra seconds.
+            form_ready = False
+            for _ in range(45):  # up to 90s
+                try:
+                    has_btn = await page.evaluate(
+                        """() => {
+                            var forms = document.querySelectorAll('form[action*="sign-in"]');
+                            for (var i = 0; i < forms.length; i++) {
+                                if (forms[i].querySelector('button[type="submit"]')) return true;
+                            }
+                            return false;
+                        }"""
+                    )
+                    if has_btn:
+                        form_ready = True
+                        break
+                except Exception:
+                    pass
+                await asyncio.sleep(2)
+            logger.info("Camoufox: login form ready=%s", form_ready)
+            await asyncio.sleep(5)
 
             # Fill login form (visible inputs, second set) and submit via
             # form.requestSubmit() — this triggers Quotex's QXvId.submit handler,
@@ -938,59 +951,75 @@ async def _camoufox_login(headed: bool = False) -> str | None:
             # always-present input[name="code"] that must be ignored (same
             # two-set layout as the login form).
             otp_el = None
-            for _ in range(35):  # up to ~105s for the OTP field to appear
+            for _ in range(50):  # up to ~150s for the OTP field to appear
                 if "/trade" in page.url.lower():
                     break
                 try:
-                    handle = await page.evaluate_handle(
-                        """
-                        () => {
-                            var els = document.querySelectorAll(
-                                'input[name="code"], input[name="otp"], ' +
-                                'input[autocomplete="one-time-code"]'
-                            );
-                            for (var i = els.length - 1; i >= 0; i--) {
-                                var el = els[i];
-                                if (el.offsetParent !== null) return el;
-                            }
-                            return null;
-                        }
-                        """
-                    )
-                    otp_el = await handle.as_element() if handle else None
+                    otp_el = await page.query_selector('input[name="code"]')
+                    if otp_el and await otp_el.is_visible():
+                        break
+                    otp_el = None
                 except Exception:
                     otp_el = None
-                if otp_el:
-                    break
                 await asyncio.sleep(3)
             if otp_el:
                 logger.info("Camoufox: OTP field appeared, reading code from Gmail...")
                 try:
-                    otp = await asyncio.wait_for(otp_task, timeout=30)
+                    otp = await asyncio.wait_for(otp_task, timeout=60)
                 except Exception:
                     otp = None
                 if otp:
                     try:
                         await otp_el.fill(otp)
                         logger.info("Camoufox: OTP filled (%s)", otp)
-                        # The OTP form needs an explicit submit (button or
-                        # Enter), otherwise Quotex never processes the code.
+                        # Submit the OTP form via form.requestSubmit() so the
+                        # code POST goes out with the server-rendered
+                        # _token/keep_code fields. A Playwright button.click()
+                        # hangs ~30s waiting for a navigation that never comes,
+                        # so requestSubmit() is used instead.
                         try:
-                            submit = await page.query_selector('button[type="submit"]')
-                            if submit:
-                                await submit.click()
-                                logger.info("Camoufox: OTP submit button clicked")
-                            else:
-                                await page.keyboard.press("Enter")
-                                logger.info("Camoufox: pressed Enter on OTP form")
+                            sub = await page.evaluate(
+                                """() => {
+                                    var form = document.querySelector('form[action*="sign-in"]');
+                                    if (!form) return "no form";
+                                    try { form.requestSubmit(); return "requestSubmit"; } catch (e) { return "err " + e; }
+                                }"""
+                            )
+                            logger.info("Camoufox: OTP submitted (%s)", sub)
                         except Exception as e:
-                            logger.warning("Camoufox: OTP submit click failed (%s), pressing Enter", e)
-                            await page.keyboard.press("Enter")
-                        await asyncio.sleep(10)
+                            logger.warning("Camoufox: OTP submit failed: %s", e)
                     except Exception as e:
                         logger.warning("Camoufox: OTP fill failed: %s", e)
                 else:
                     logger.warning("Camoufox: OTP input present but no code read from Gmail")
+
+                # Wait for the OTP POST to be accepted (/trade) or a re-rendered
+                # OTP form (code rejected). Retry once with a fresh code.
+                for _retry in range(3):  # 3 x 8s = 24s
+                    await asyncio.sleep(8)
+                    if "/trade" in page.url.lower():
+                        break
+                    if _retry == 2:
+                        break
+                    try:
+                        code_again = await page.query_selector('input[name="code"]')
+                        if code_again and await code_again.is_visible():
+                            new_otp = await asyncio.to_thread(
+                                auto_read_otp_sync, timeout=60, since=login_ts
+                            )
+                            if new_otp:
+                                await code_again.fill(new_otp)
+                                await page.evaluate(
+                                    """() => {
+                                        var form = document.querySelector('form[action*="sign-in"]');
+                                        if (form) { try { form.requestSubmit(); } catch (e) {} }
+                                    }"""
+                                )
+                                logger.info("Camoufox: OTP resubmitted (%s)", new_otp)
+                    except Exception:
+                        pass
+            else:
+                logger.info("Camoufox: no OTP field needed (or never appeared)")
 
             # Navigate to trade page if not already there
             if "/trade" not in page.url:
