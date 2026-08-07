@@ -104,6 +104,7 @@ def _patch_check_connect_timeout() -> None:
 
 async def _connect_with_token(email, token, session):
     from pyquotex.stable_api import Quotex
+    from pyquotex.types import ReconnectPolicy
     _patch_check_connect_timeout()
     use_proxy = os.getenv("BOT_USE_PROXY", "false").lower() in ("true", "1", "yes")
     proxy_str = os.getenv("QUOTEX_PROXY") or ""
@@ -114,6 +115,14 @@ async def _connect_with_token(email, token, session):
         proxies = {"http": proxy_str, "https": proxy_str}
     else:
         logger.info("pyquotex: connecting to Quotex DIRECTLY (no proxy for WebSocket)")
+    reconnect_policy = ReconnectPolicy(
+        enabled=True,
+        max_attempts=0,
+        base_delay=15.0,
+        max_delay=120.0,
+        jitter=0.2,
+        stale_timeout=60.0,
+    )
     client = Quotex(
         email=email,
         password='not-needed',
@@ -121,6 +130,7 @@ async def _connect_with_token(email, token, session):
         lang='en',
         wss_url_override='wss://ws2.qxbroker.com/socket.io/?EIO=3&transport=websocket',
         proxies=proxies,
+        reconnect_policy=reconnect_policy,
     )
     client.set_account_mode("REAL")
     client.set_session(
@@ -255,12 +265,12 @@ def stop_watchdog():
         logger.info("Token watchdog stopped")
 
 
-async def _connect_with_retries(email, token, session, attempts=4, delay=3):
+async def _connect_with_retries(email, token, session, attempts=5, delay=10):
     """Try connecting with a token several times before giving up.
 
     Proxy hiccups are transient; retrying the same still-valid token avoids
     triggering a costly Camoufox re-login on every brief proxy failure.
-    Backs off a bit between attempts (3s, 6s, 10s, ...).
+    Backs off between attempts (10s, 20s, 30s, ...) to avoid 429 rate limits.
     """
     last_err = None
     for i in range(1, attempts + 1):
