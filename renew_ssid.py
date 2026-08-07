@@ -842,13 +842,26 @@ async def _camoufox_login(headed: bool = False) -> str | None:
             await page.keyboard.press("Backspace")
             await page.keyboard.type(password, delay=50)
 
-            # Find Sign in button by coordinates
+            # Find Sign in button by coordinates — try multiple selectors
             btn_pos = await page.evaluate("""
                 () => {
-                    var btns = document.querySelectorAll('button[type="submit"]');
-                    for (var b of btns) {
+                    // Try submit buttons first
+                    var selectors = ['button[type="submit"]', 'button', 'input[type="submit"]', 'a.button', '.btn'];
+                    for (var sel of selectors) {
+                        var btns = document.querySelectorAll(sel);
+                        for (var b of btns) {
+                            var r = b.getBoundingClientRect();
+                            if (r.width < 50 || r.height < 20) continue;
+                            var txt = (b.innerText || b.value || '').trim().toLowerCase();
+                            if (txt.includes('sign') || txt.includes('log') || txt.includes('enter') || txt.includes('submit'))
+                                return {x: r.x+r.width/2, y: r.y+r.height/2, txt: (b.innerText || b.value || '').trim()};
+                        }
+                    }
+                    // Fallback: find the first large visible button in the form area
+                    var allBtns = document.querySelectorAll('button');
+                    for (var b of allBtns) {
                         var r = b.getBoundingClientRect();
-                        if (r.width > 100 && r.height > 40 && b.innerText.trim().toLowerCase().includes('sign in'))
+                        if (r.width > 100 && r.height > 35 && r.y > 200)
                             return {x: r.x+r.width/2, y: r.y+r.height/2, txt: b.innerText.trim()};
                     }
                     return null;
