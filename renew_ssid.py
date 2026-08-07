@@ -786,8 +786,9 @@ async def _camoufox_login(headed: bool = False) -> str | None:
                     logger.warning("[1] Nav failed: %s", e)
                     await asyncio.sleep(5)
 
-            # Wait: 120s first time, 40s after
-            wait_time = 120 if first_load else 40
+            # Wait: 30s first time (direct VPS is fast), 120s if proxy is slow
+            using_proxy = os.getenv("CAMOUFOX_USE_PROXY", "true").lower() not in ("false", "0", "no")
+            wait_time = 120 if (first_load and using_proxy) else (30 if first_load else 40)
             first_load = False
             logger.info("[2] Waiting %ds for page render...", wait_time)
             await asyncio.sleep(wait_time)
