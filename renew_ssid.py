@@ -697,8 +697,12 @@ def _ensure_socks_relay() -> dict | None:
 
     For socks5 proxies with credentials, spawn a local relay so Playwright can
     use it. For plain http(s)/no-auth socks5, use the proxy directly.
+    Set CAMOUFOX_USE_PROXY=false in .env to disable proxy for Camoufox too.
     """
     global _SOCKS_RELAY
+    if os.getenv("CAMOUFOX_USE_PROXY", "true").lower() in ("false", "0", "no"):
+        logger.info("Camoufox proxy DISABLED (CAMOUFOX_USE_PROXY=false)")
+        return None
     proxy_env = os.getenv("CAMOUFOX_PROXY") or os.getenv("QUOTEX_PROXY") or os.getenv("TELEGRAM_PROXY")
     if not proxy_env:
         return None
