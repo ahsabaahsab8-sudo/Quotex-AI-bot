@@ -2,7 +2,11 @@
 # Quotex Bot 24/7 Startup Script for VPS
 # Run: bash run_24_7.sh
 
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Activate virtual environment
+source venv/bin/activate
 
 # Kill any existing bot processes
 pkill -f "quotex_bot.py" 2>/dev/null || true
