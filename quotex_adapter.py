@@ -90,7 +90,7 @@ def _patch_check_connect_timeout() -> None:
         try:
             await wait_until(
                 lambda: state.auth_status != AuthStatus.NOT_AUTHENTICATED,
-                timeout=30,
+                timeout=60,
                 poll_interval=0.25,
             )
         except asyncio.TimeoutError:
@@ -131,7 +131,7 @@ async def _connect_with_token(email, token, session):
     if not ok:
         await client.close()
         return None, msg
-    await client.api.event_registry.wait_event("instruments_ready", timeout=30)
+    await client.api.event_registry.wait_event("instruments_ready", timeout=90)
     return client, None
 
 
@@ -377,7 +377,7 @@ async def fetch_candles(client, token: str, count: int = 18000, timeframe: int =
             asset=token,
             amount_of_seconds=amount,
             period=timeframe,
-            timeout=30,
+            timeout=90,
             max_workers=3,
         )
         if not candles:
