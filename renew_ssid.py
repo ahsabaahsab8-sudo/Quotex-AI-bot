@@ -717,8 +717,7 @@ def _ensure_socks_relay() -> dict | None:
 
 
 async def _camoufox_login(headed: bool = False) -> str | None:
-    """Login via Camoufox (custom Firefox build with C++ stealth).
-    Works on both Windows and Linux. Bypasses Cloudflare reliably."""
+    """Login via Camoufox. Uses natural mouse clicks + Gmail API for OTP."""
     email = os.getenv("QUOTEX_EMAIL")
     password = os.getenv("QUOTEX_PASSWORD")
     if not email or not password:
@@ -727,19 +726,18 @@ async def _camoufox_login(headed: bool = False) -> str | None:
     try:
         from camoufox.async_api import AsyncCamoufox
     except ImportError:
-        logger.error("camoufox not installed. Run: pip install camoufox[geoip] && python -m camoufox fetch")
+        logger.error("camoufox not installed")
         return None
+
+    # Bypass proxy for Gmail API
+    os.environ["NO_PROXY"] = "googleapis.com,google.com"
+    os.environ["no_proxy"] = "googleapis.com,google.com"
 
     token = None
     ua = None
+    first_load = True
     try:
-        # Proxy from env: CAMOUFOX_PROXY, QUOTEX_PROXY, then TELEGRAM_PROXY.
-        # Camoufox must use the Quotex proxy, NOT the Telegram proxy.
-        # SOCKS5-with-auth proxies get a local no-auth relay (Playwright cannot
-        # authenticate SOCKS5); everything else is passed straight through.
         proxy_cfg = _ensure_socks_relay()
-        if proxy_cfg:
-            logger.info("Camoufox: using proxy from env")
 
         async with AsyncCamoufox(
             humanize=True,
@@ -748,329 +746,206 @@ async def _camoufox_login(headed: bool = False) -> str | None:
             headless=not headed,
             proxy=proxy_cfg,
             firefox_user_prefs={
-                # Skip glxtest/GPU detection — missing glxtest binary SIGSEGVs
-                # on headless Linux containers (daijro/camoufox#456)
+                "network.proxy.type": 1,
+                "network.proxy.no_proxies_on": "localhost, 127.0.0.1",
                 "gfx.xrender.enabled": False,
                 "layers.acceleration.disabled": True,
                 "gfx.canvas.accelerated": False,
                 "webgl.disabled": True,
                 "webgl.enable-webgl2": False,
                 "gfx.x11-egl.force-disabled": True,
-                # Disable Firefox prompts that block in non-interactive envs
                 "security.prompt_for_key_storage_type": False,
                 "signon.masterPasswordRequired": False,
                 "signon.rememberSignons": False,
                 "signon.autofillForms": False,
                 "security.default_personal_cert": "Select Automatically",
                 "accessibility.force_disabled": 1,
-                "browser.downgrade.enabled": True,
+                "browser.downdown.enabled": True,
             },
         ) as browser:
             page = await browser.new_page()
 
-            # Block navigation redirect to qxbroker.com but allow sub-resources
             async def block_qxbroker_nav(route):
                 url = route.request.url
                 if "qxbroker.com" in url and route.request.resource_type == "document":
-                    logger.info("Camoufox: blocked nav redirect to qxbroker.com")
                     await route.abort()
                 else:
                     await route.continue_()
             await page.route("**/*", block_qxbroker_nav)
 
-            logger.info("Camoufox: navigating to sign-in page...")
-            resp = None
-            try:
-                resp = await page.goto(
-                    "https://market-qx.trade/en/sign-in/",
-                    wait_until="domcontentloaded", timeout=120000
-                )
-            except Exception:
-                pass
-
-            final_url = page.url
-            logger.info("Camoufox: URL after nav: %s", final_url)
-
-            # Retry with navigation redirect blocked if we got redirected
-            if "qxbroker.com" in final_url:
-                logger.info("Camoufox: server redirected to qxbroker.com, retrying with redirect blocked...")
-                await page.goto(
-                    "about:blank",
-                    wait_until="domcontentloaded", timeout=10000
-                )
-                await asyncio.sleep(1)
+            for attempt in range(10):
                 try:
-                    await page.goto(
-                        "https://market-qx.trade/en/sign-in/",
-                        wait_until="domcontentloaded", timeout=120000
-                    )
-                except Exception:
-                    pass
-                final_url = page.url
-                logger.info("Camoufox: URL after retry: %s", final_url)
+                    logger.info("[1] Loading sign-in page...")
+                    await page.goto("https://market-qx.trade/en/sign-in/", wait_until="domcontentloaded", timeout=60000)
+                    break
+                except Exception as e:
+                    logger.warning("[1] Nav failed: %s", e)
+                    await asyncio.sleep(5)
 
-            # Handle Cloudflare if present
-            title = await page.title()
-            if "Just a moment" in title:
-                logger.info("Camoufox: Cloudflare detected, waiting...")
-                try:
-                    await page.wait_for_function(
-                        "() => !document.title.includes('Just a moment')",
-                        timeout=120000
-                    )
-                    logger.info("Camoufox: Cloudflare passed")
-                except Exception:
-                    logger.warning("Camoufox: Cloudflare still active, continuing...")
+            # Wait: 120s first time, 40s after
+            wait_time = 120 if first_load else 40
+            first_load = False
+            logger.info("[2] Waiting %ds for page render...", wait_time)
+            await asyncio.sleep(wait_time)
+            logger.info("[2] Page ready: %s", page.url)
 
-            await asyncio.sleep(3)
-
-            # The proxy is a rotating residential proxy: some exit IPs are
-            # geo-blocked by Quotex ("not available in your region"). When that
-            # happens the login form never renders. Detect it and fail fast so
-            # renew_ssid retries on a NEW browser = NEW exit IP.
+            # Check geo-block
             try:
                 body_text = await page.evaluate("() => document.body ? document.body.innerText : ''")
                 if "not available in your region" in body_text:
-                    logger.warning("Camoufox: exit IP geo-blocked by Quotex, retrying on new IP...")
+                    logger.warning("[2] GEO BLOCKED — retrying on new IP...")
                     return None
             except Exception:
                 pass
 
-            # Wait for the login form to be FULLY rendered AND React hydrated
-            # before filling. domcontentloaded does NOT mean the SPA form is
-            # interactive yet — filling or submitting too early (before React
-            # attaches QXvId.submit) means NO login request is sent at all.
-            # state="visible" is unreliable here (proxy + Cloudflare makes the
-            # form render 60-75s late), so poll for the form's submit button
-            # and then give React a few extra seconds.
-            form_ready = False
-            for _ in range(45):  # up to 90s
-                try:
-                    has_btn = await page.evaluate(
-                        """() => {
-                            var forms = document.querySelectorAll('form[action*="sign-in"]');
-                            for (var i = 0; i < forms.length; i++) {
-                                if (forms[i].querySelector('button[type="submit"]')) return true;
-                            }
-                            return false;
-                        }"""
-                    )
-                    if has_btn:
-                        form_ready = True
-                        break
-                except Exception:
-                    pass
-                await asyncio.sleep(2)
-            logger.info("Camoufox: login form ready=%s", form_ready)
-            await asyncio.sleep(5)
-
-            # Fill login form (visible inputs, second set) and submit via
-            # form.requestSubmit() — this triggers Quotex's QXvId.submit handler,
-            # which is what actually sends the login + OTP email. A plain
-            # b.click() on the button does NOT fire that handler (verified:
-            # clicking produced no OTP email). React-controlled inputs ignore
-            # plain .value, so use the native value setter + input event.
-            login_ts = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=10)
-            login_result = await page.evaluate(
-                """
-                (args) => {
-                    var emails = document.querySelectorAll('input[name="email"]');
-                    var passes = document.querySelectorAll('input[name="password"]');
-                    if (!emails.length || !passes.length) return "no inputs found";
-                    var email = emails.length > 1 ? emails[1] : emails[0];
-                    var pass = passes.length > 1 ? passes[1] : passes[0];
-                    if (!email.offsetParent || !pass.offsetParent) return "inputs not visible";
-                    var setVal = (el, value) => {
-                        var proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype
-                                                            : HTMLInputElement.prototype;
-                        var desc = Object.getOwnPropertyDescriptor(proto, 'value');
-                        desc.set.call(el, value);
-                        el.dispatchEvent(new Event('input', { bubbles: true }));
-                    };
-                    setVal(email, args[0]);
-                    setVal(pass, args[1]);
-                    var form = email.closest('form');
-                    if (form && form.requestSubmit) {
-                        try {
-                            form.requestSubmit();
-                            return "requestSubmit";
-                        } catch (e) {}
-                    }
-                    var buttons = document.querySelectorAll('button');
-                    for (var i = buttons.length - 1; i >= 0; i--) {
-                        var b = buttons[i];
-                        var t = (b.textContent || '').trim().toLowerCase();
-                        if (b.offsetParent !== null && b.type === 'submit') {
-                            b.click();
-                            return "clicked submit button";
-                        }
-                    }
-                    return "Sign in button not found";
-                }
-                """,
-                [email, password]
-            )
-            logger.info("Camoufox: form result: %s", login_result)
-            if login_result == "no inputs found":
-                logger.info("Camoufox: current URL: %s", page.url)
-                logger.info("Camoufox: page title: %s", await page.title())
-
-            # If requestSubmit fell through to a plain button click, the login
-            # may not have fired Quotex's handler. Retry via requestSubmit on
-            # the form directly after a short delay.
-            if login_result == "clicked submit button":
-                await asyncio.sleep(1)
-                try:
-                    resub = await page.evaluate(
-                        """
-                        () => {
-                            var inputs = document.querySelectorAll('input[name="email"]');
-                            if (!inputs.length) return null;
-                            var form = inputs[inputs.length - 1].closest('form');
-                            if (form && form.requestSubmit) { form.requestSubmit(); return "requestSubmit"; }
-                            return null;
-                        }
-                        """
-                    )
-                    if resub:
-                        login_result = resub
-                        logger.info("Camoufox: re-submitted via requestSubmit")
-                except Exception:
-                    pass
-
-            # Start reading Gmail for the OTP IMMEDIATELY, in parallel with
-            # waiting for the OTP field. The email arrives ~50s after submit;
-            # starting late adds a huge delay and the code may already be old.
-            otp_task = asyncio.create_task(
-                asyncio.to_thread(auto_read_otp_sync, timeout=150, since=login_ts)
-            )
-
-            # If Quotex demands a verification code (new IP login), the page
-            # stays on /sign-in. Auto-fill it from Gmail via Gmail API OTP reader.
-            # Only a VISIBLE OTP input counts — the DOM contains a hidden
-            # always-present input[name="code"] that must be ignored (same
-            # two-set layout as the login form).
-            otp_el = None
-            for _ in range(50):  # up to ~150s for the OTP field to appear
-                if "/trade" in page.url.lower():
-                    break
-                try:
-                    otp_el = await page.query_selector('input[name="code"]')
-                    if otp_el and await otp_el.is_visible():
-                        break
-                    otp_el = None
-                except Exception:
-                    otp_el = None
-                await asyncio.sleep(3)
-            if otp_el:
-                logger.info("Camoufox: OTP field appeared, reading code from Gmail...")
-                try:
-                    otp = await asyncio.wait_for(otp_task, timeout=60)
-                except Exception:
-                    otp = None
-                if otp:
-                    try:
-                        await otp_el.fill(otp)
-                        logger.info("Camoufox: OTP filled (%s)", otp)
-                        # Submit the OTP form via form.requestSubmit() so the
-                        # code POST goes out with the server-rendered
-                        # _token/keep_code fields. A Playwright button.click()
-                        # hangs ~30s waiting for a navigation that never comes,
-                        # so requestSubmit() is used instead.
-                        try:
-                            sub = await page.evaluate(
-                                """() => {
-                                    var form = document.querySelector('form[action*="sign-in"]');
-                                    if (!form) return "no form";
-                                    try { form.requestSubmit(); return "requestSubmit"; } catch (e) { return "err " + e; }
-                                }"""
-                            )
-                            logger.info("Camoufox: OTP submitted (%s)", sub)
-                        except Exception as e:
-                            logger.warning("Camoufox: OTP submit failed: %s", e)
-                    except Exception as e:
-                        logger.warning("Camoufox: OTP fill failed: %s", e)
-                else:
-                    logger.warning("Camoufox: OTP input present but no code read from Gmail")
-
-                # Wait for the OTP POST to be accepted (/trade) or a re-rendered
-                # OTP form (code rejected). Retry once with a fresh code.
-                for _retry in range(3):  # 3 x 8s = 24s
-                    await asyncio.sleep(8)
-                    if "/trade" in page.url.lower():
-                        break
-                    if _retry == 2:
-                        break
-                    try:
-                        code_again = await page.query_selector('input[name="code"]')
-                        if code_again and await code_again.is_visible():
-                            new_otp = await asyncio.to_thread(
-                                auto_read_otp_sync, timeout=60, since=login_ts
-                            )
-                            if new_otp:
-                                await code_again.fill(new_otp)
-                                await page.evaluate(
-                                    """() => {
-                                        var form = document.querySelector('form[action*="sign-in"]');
-                                        if (form) { try { form.requestSubmit(); } catch (e) {} }
-                                    }"""
-                                )
-                                logger.info("Camoufox: OTP resubmitted (%s)", new_otp)
-                    except Exception:
-                        pass
-            else:
-                logger.info("Camoufox: no OTP field needed (or never appeared)")
-
-            # Navigate to trade page if not already there
-            if "/trade" not in page.url:
-                try:
-                    await page.goto(
-                        "https://market-qx.trade/en/trade",
-                        wait_until="domcontentloaded", timeout=60000
-                    )
-                    await asyncio.sleep(5)
-                except Exception:
-                    pass
-
-            logger.info("Camoufox: trade URL: %s", page.url)
-
-            # Extract token — poll/wait for up to 60s instead of one-shot.
-            # The SSID cookie / window.settings.token is written only after the
-            # trade SPA's websocket auth completes, which is slower over a
-            # proxy on servers (was returning None on the VPS).
-            token = None
-            extract_js = """
+            # Find email input by coordinates
+            email_pos = await page.evaluate("""
                 () => {
-                    try { if (window.settings && window.settings.token) return window.settings.token; } catch(e) {}
-                    try {
-                        var scripts = document.querySelectorAll('script');
-                        for (var i = 0; i < scripts.length; i++) {
-                            var t = scripts[i].textContent;
-                            if (t && t.includes('token')) {
-                                var m = t.match(/["']token["']\\s*[:=]\\s*["']([^"']+)["']/);
-                                if (m) return m[1];
-                            }
-                        }
-                    } catch(e) {}
-                    try { var s = document.cookie.match(/ssid=([^;]+)/); return s ? s[1] : null; } catch(e) {}
-                    try { var l = localStorage.getItem('token') || localStorage.getItem('ssid'); if (l) return l; } catch(e) {}
-                    try { var st = sessionStorage.getItem('token') || sessionStorage.getItem('ssid'); if (st) return st; } catch(e) {}
+                    var els = document.querySelectorAll('input[name="email"]');
+                    for (var el of els) {
+                        var r = el.getBoundingClientRect();
+                        if (r.width > 50 && r.height > 10) return {x: r.x+r.width/2, y: r.y+r.height/2};
+                    }
                     return null;
                 }
-            """
-            for _attempt in range(20):  # 20 x 3s = up to 60s
+            """)
+            if not email_pos:
+                logger.error("[3] Email input not found")
+                return None
+
+            logger.info("[3] Typing email...")
+            await page.mouse.click(email_pos["x"], email_pos["y"])
+            await asyncio.sleep(0.5)
+            await page.keyboard.press("Control+a")
+            await page.keyboard.press("Backspace")
+            await page.keyboard.type(email, delay=50)
+
+            # Find password input by coordinates
+            pass_pos = await page.evaluate("""
+                () => {
+                    var els = document.querySelectorAll('input[name="password"]');
+                    for (var el of els) {
+                        var r = el.getBoundingClientRect();
+                        if (r.width > 50 && r.height > 10) return {x: r.x+r.width/2, y: r.y+r.height/2};
+                    }
+                    return null;
+                }
+            """)
+            if not pass_pos:
+                logger.error("[4] Password input not found")
+                return None
+
+            logger.info("[4] Typing password...")
+            await page.mouse.click(pass_pos["x"], pass_pos["y"])
+            await asyncio.sleep(0.5)
+            await page.keyboard.press("Control+a")
+            await page.keyboard.press("Backspace")
+            await page.keyboard.type(password, delay=50)
+
+            # Find Sign in button by coordinates
+            btn_pos = await page.evaluate("""
+                () => {
+                    var btns = document.querySelectorAll('button[type="submit"]');
+                    for (var b of btns) {
+                        var r = b.getBoundingClientRect();
+                        if (r.width > 100 && r.height > 40 && b.innerText.trim().toLowerCase().includes('sign in'))
+                            return {x: r.x+r.width/2, y: r.y+r.height/2, txt: b.innerText.trim()};
+                    }
+                    return null;
+                }
+            """)
+            if not btn_pos:
+                logger.error("[5] Sign in button not found")
+                return None
+
+            login_ts = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=10)
+            logger.info("[5] Clicking Sign in...")
+            await page.mouse.click(btn_pos["x"], btn_pos["y"])
+            logger.info("[5] CLICKED!")
+
+            # Watch for OTP or /trade
+            logger.info("[6] Watching page...")
+            otp_detected = False
+            for i in range(90):
+                await asyncio.sleep(2)
+                elapsed = (i+1)*2
+                state = await page.evaluate("""
+                    () => ({
+                        url: location.href,
+                        isTrade: location.href.includes('/trade'),
+                        otpVisible: Array.from(document.querySelectorAll('input[name="code"]')).some(el => el.offsetParent !== null && window.getComputedStyle(el).display !== 'none')
+                    })
+                """)
+                if state["isTrade"]:
+                    logger.info("[6] [%ds] ON TRADE!", elapsed)
+                    break
+                if state["otpVisible"]:
+                    logger.info("[6] [%ds] OTP PAGE!", elapsed)
+                    otp_detected = True
+                    break
+                if elapsed % 20 == 0:
+                    logger.info("[6] [%ds] URL: %s", elapsed, state["url"])
+            else:
+                logger.error("[6] TIMEOUT")
+                return None
+
+            # OTP
+            if otp_detected:
+                logger.info("[7] Getting OTP from Gmail API...")
+                otp = await asyncio.to_thread(auto_read_otp_sync, timeout=150, since=login_ts)
+                if not otp:
+                    logger.error("[7] No OTP received")
+                    return None
+
+                logger.info("[7] OTP: %s", otp)
+                otp_pos = await page.evaluate("""
+                    () => {
+                        var el = document.querySelector('input[name="code"]');
+                        if (!el) return null;
+                        var r = el.getBoundingClientRect();
+                        if (r.width === 0) return null;
+                        return {x: r.x+r.width/2, y: r.y+r.height/2};
+                    }
+                """)
+                if not otp_pos:
+                    logger.error("[7] OTP input not found")
+                    return None
+
+                await page.mouse.click(otp_pos["x"], otp_pos["y"])
+                await asyncio.sleep(0.5)
+                await page.keyboard.type(otp, delay=100)
+                await page.keyboard.press("Enter")
+                logger.info("[7] OTP submitted")
+
+                for i in range(30):
+                    await asyncio.sleep(3)
+                    if "/trade" in page.url.lower():
+                        logger.info("[7] [%ds] ON TRADE!", (i+1)*3)
+                        break
+
+            # Navigate to trade if needed
+            if "/trade" not in page.url.lower():
                 try:
-                    token = await page.evaluate(extract_js)
+                    await page.goto("https://market-qx.trade/en/trade", wait_until="domcontentloaded", timeout=60000)
+                    await asyncio.sleep(10)
                 except Exception:
-                    token = None
+                    pass
+
+            logger.info("[8] Extracting token... URL: %s", page.url)
+
+            token = None
+            for i in range(40):
+                try:
+                    cookies = await page.context.cookies()
+                    for c in cookies:
+                        if "ssid" in c["name"].lower() and c.get("value"):
+                            token = c["value"]
+                            break
+                except Exception:
+                    pass
                 if not token:
                     try:
-                        cookies = await page.context.cookies()
-                        for c in cookies:
-                            if "ssid" in c["name"].lower():
-                                if c.get("value"):
-                                    token = c["value"]
-                                    break
+                        token = await page.evaluate("() => window.settings?.token || null")
                     except Exception:
                         pass
                 if token:
@@ -1078,7 +953,7 @@ async def _camoufox_login(headed: bool = False) -> str | None:
                 await asyncio.sleep(3)
 
             ua = await page.evaluate("navigator.userAgent")
-            logger.info("Camoufox: token: %s...%s", token[:8] if token else "None", token[-4:] if token else "")
+            logger.info("[8] Token: %s...%s", token[:15] if token else "None", token[-5:] if token else "")
     except Exception as e:
         logger.error("Camoufox login failed: %s", e)
 
