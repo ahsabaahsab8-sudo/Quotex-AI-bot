@@ -105,14 +105,15 @@ def _patch_check_connect_timeout() -> None:
 async def _connect_with_token(email, token, session):
     from pyquotex.stable_api import Quotex
     _patch_check_connect_timeout()
-    proxy_str = os.getenv("QUOTEX_PROXY") or os.getenv("TELEGRAM_PROXY") or ""
+    use_proxy = os.getenv("BOT_USE_PROXY", "false").lower() in ("true", "1", "yes")
+    proxy_str = os.getenv("QUOTEX_PROXY") or ""
     proxies = None
-    if proxy_str:
+    if use_proxy and proxy_str:
         _install_proxy_patch(proxy_str)
         logger.info("pyquotex: connecting to Quotex via proxy %s", proxy_str)
         proxies = {"http": proxy_str, "https": proxy_str}
     else:
-        logger.info("pyquotex: connecting to Quotex DIRECTLY (no proxy)")
+        logger.info("pyquotex: connecting to Quotex DIRECTLY (no proxy for WebSocket)")
     client = Quotex(
         email=email,
         password='not-needed',
