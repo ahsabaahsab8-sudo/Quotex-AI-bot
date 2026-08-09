@@ -1231,6 +1231,15 @@ DIFFUSION_GEMMA_RESPONSE_SCHEMA = {
     "additionalProperties": False
 }
 
+# When the chart image is attached, chart_analysis must be filled in too.
+DIFFUSION_GEMMA_RESPONSE_SCHEMA_WITH_CHART = {
+    **DIFFUSION_GEMMA_RESPONSE_SCHEMA,
+    "required": [
+        "direction", "confidence", "martingale_recommendation",
+        "chain_of_thought_reasoning", "analysis", "chart_analysis", "reason",
+    ],
+}
+
 
 CHART_IMAGE_PROMPT_SECTION = """
 ### CHART IMAGE ANALYSIS (VISUAL CONFIRMATION)
@@ -1258,8 +1267,10 @@ async def query_glm_analysis(tech_data: dict, chart_b64: str | None = None) -> d
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{chart_b64}"}},
             {"type": "text", "text": prompt},
         ]
+        schema = DIFFUSION_GEMMA_RESPONSE_SCHEMA_WITH_CHART
     else:
         user_content = prompt
+        schema = DIFFUSION_GEMMA_RESPONSE_SCHEMA
     try:
         completion = await asyncio.to_thread(
             nvidia_client.chat.completions.create,
@@ -1269,7 +1280,7 @@ async def query_glm_analysis(tech_data: dict, chart_b64: str | None = None) -> d
                 {"role": "user", "content": user_content}
             ],
             temperature=0.2, top_p=0.7, max_tokens=8192,
-            response_format={"type": "json_schema", "json_schema": {"name": "trading_analysis", "strict": True, "schema": DIFFUSION_GEMMA_RESPONSE_SCHEMA}}
+            response_format={"type": "json_schema", "json_schema": {"name": "trading_analysis", "strict": True, "schema": schema}}
         )
         text = completion.choices[0].message.content.strip()
         text = text.replace("```json", "").replace("```", "").strip()
@@ -1517,7 +1528,7 @@ async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: 
             reason = res.get("reason", "")
             line = f"{name}: {direction} ({conf}%) - {reason}"
             chart_analysis = res.get("chart_analysis") or {}
-            if isinstance(chart_analysis, dict) and chart_analysis.get("visual_trend"):
+            if isinstance(chart_analysis, dict):
                 ca = " | ".join(
                     f"{k}: {v}" for k, v in (
                         ("Visual chart", chart_analysis.get("visual_trend")),
@@ -1527,10 +1538,12 @@ async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: 
                         ("Visual override", chart_analysis.get("visual_signal_override")),
                     ) if v
                 )
-                line = f"{line}\n   👁️ CHART SEEN BY {name}: {ca}"
+                if ca:
+                    line = f"{line}\n   👁️ CHART SEEN BY {name}: {ca}"
             reasons.append(line)
             model_details.append({"model": name, "direction": direction, "confidence": conf})
-            logger.info(f"{name} votes {direction} ({conf}%)" + (f" | chart: {chart_analysis.get('visual_trend')}" if chart_analysis.get("visual_trend") else ""))
+            chart_trend = chart_analysis.get("visual_trend") if isinstance(chart_analysis, dict) else None
+            logger.info(f"{name} votes {direction} ({conf}%)" + (f" | chart: {chart_trend}" if chart_trend else ""))
         else:
             logger.warning(f"{name} returned invalid direction: {res.get('direction')}")
 
