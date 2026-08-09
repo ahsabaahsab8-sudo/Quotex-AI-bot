@@ -1292,7 +1292,11 @@ async def query_glm_analysis(tech_data: dict, chart_b64: str | None = None) -> d
         )
         text = completion.choices[0].message.content.strip()
         text = text.replace("```json", "").replace("```", "").strip()
-        return _coerce_dict(json.loads(text))
+        data = _coerce_dict(json.loads(text))
+        if isinstance(data, dict):
+            ca = data.get("chart_analysis")
+            logger.info(f"Diffusion Gemma response chart_analysis: " + (json.dumps(ca) if ca else "MISSING"))
+        return data
     except Exception as e:
         logger.error(f"Diffusion Gemma failed: {e}")
         return None
