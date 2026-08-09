@@ -1242,16 +1242,24 @@ DIFFUSION_GEMMA_RESPONSE_SCHEMA_WITH_CHART = {
 
 
 CHART_IMAGE_PROMPT_SECTION = """
-### CHART IMAGE ANALYSIS (VISUAL CONFIRMATION)
-A live screenshot of the candlestick chart for this asset is attached to this message.
-Use it as a visual confirmation layer on top of the telemetry:
-- Visually confirm the trend direction and EMA alignment you derive from the telemetry.
-- Note the candlestick pattern forming at the current price level.
-- Look for visible support/resistance levels, round-number magnets, or stop-hunt spikes.
-- If the chart clearly contradicts the telemetry, lower your confidence accordingly.
-Fill in the "chart_analysis" block in your output:
+### CHART IMAGE ANALYSIS (VISUAL CONFIRMATION) - MANDATORY
+A live candlestick chart image for this asset IS ATTACHED to this message.
+You MUST look at the chart image and use it as your PRIMARY visual confirmation layer.
+You are FORBIDDEN from ignoring the chart image or answering purely from telemetry alone.
+
+You MUST do all of the following from the chart image:
+- Read the actual candle bodies and wicks: confirm the recent trend direction (higher highs / lower lows).
+- Check the EMA lines on the chart: which side is price trading on, are they stacked bullish or bearish?
+- Identify the candlestick pattern forming AT the current price (engulfing, pin bar, doji, etc.).
+- Note visible support/resistance levels, round-number magnets, and stop-hunt spikes.
+- Compare the chart picture against the telemetry: if they disagree, say so and lower confidence.
+
+The "chart_analysis" block is REQUIRED. It MUST be filled from what you visually see on the chart,
+NOT from telemetry alone:
   visual_trend (UP/DOWN/SIDEWAYS), key_levels_seen, pattern_at_price,
   telemetry_agreement (CONFIRMS/CONTRADICTS/NEUTRAL), visual_signal_override (BUY/SELL/NEUTRAL).
+In "reason", START with one sentence describing what you saw on the chart
+(e.g. "The chart shows...") so it is clear you viewed the image.
 """
 
 
