@@ -1,0 +1,620 @@
+2026-07-28 02:10:32.937 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 02:10:32.937 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 02:10:32.937 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 02:12:27.598 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 02:12:27.598 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 02:12:27.599 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 02:12:44.938 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 02:12:44.938 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 02:12:44.938 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 02:13:09.911 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 02:13:09.911 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 02:13:09.912 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 02:13:10.043 | INFO     | api_quotex.config:save_config:168 - Configuration saved to config.json
+2026-07-28 02:13:11.246 | WARNING  | api_quotex.login:get_ssid:379 - Cloudscraper GET /sign-in failed with status 403; switching to Playwright
+2026-07-28 02:13:12.959 | INFO     | api_quotex.login:_playwright_login_and_capture:154 - Playwright: opening login page...
+2026-07-28 02:13:46.265 | ERROR    | api_quotex.login:_playwright_login_and_capture:217 - Playwright login failed: Page.wait_for_selector: Timeout 30000ms exceeded.
+Call log:
+  - waiting for locator("#tab-1 form[action$=\"/sign-in/\"]") to be visible
+
+2026-07-28 02:13:46.266 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Playwright login failed: Page.wait_for_selector: Timeout 30000ms exceeded.
+Call log:
+  - waiting for locator("#tab-1 form[action$=\"/sign-in/\"]") to be visible
+
+2026-07-28 02:13:46.560 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Unable to retrieve a valid SSID via Cloudscraper or Playwright.
+2026-07-28 02:17:29.829 | INFO     | api_quotex.config:_load_config:103 - Configuration loaded from config.json
+2026-07-28 02:17:29.829 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 02:17:29.829 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 02:17:35.426 | INFO     | api_quotex.config:_load_config:103 - Configuration loaded from config.json
+2026-07-28 02:17:35.427 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 02:17:35.427 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 02:17:52.574 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 02:17:52.575 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 02:17:52.575 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 02:17:52.707 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:17:52.707 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:17:52.707 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:17:52.707 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:17:52.712 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:17:52.712 | INFO     | api_quotex.websocket_client:connect:154 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:17:52.715 | WARNING  | api_quotex.websocket_client:connect:196 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: module 'importlib.metadata' has no attribute 'get_distribution'
+2026-07-28 02:17:52.715 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: module 'importlib.metadata' has no attribute 'get_distribution'
+2026-07-28 02:17:52.715 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 02:17:52.716 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:17:52.716 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:17:52.716 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:17:54.530 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:17:54.530 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:17:54.530 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:17:55.582 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:17:55.582 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:17:55.582 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:17:55.582 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:17:55.583 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:17:55.583 | INFO     | api_quotex.websocket_client:connect:154 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:17:55.583 | WARNING  | api_quotex.websocket_client:connect:196 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: module 'importlib.metadata' has no attribute 'get_distribution'
+2026-07-28 02:17:55.584 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: module 'importlib.metadata' has no attribute 'get_distribution'
+2026-07-28 02:17:55.584 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 02:17:55.584 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:17:55.584 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:17:55.584 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:17:57.391 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:17:57.391 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:17:57.391 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:18:24.834 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 02:18:24.835 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 02:18:24.835 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 02:18:24.966 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:18:24.966 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:18:24.966 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:18:24.966 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:18:24.976 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:18:24.976 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:18:24.990 | WARNING  | api_quotex.websocket_client:connect:199 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: BaseEventLoop.create_connection() got an unexpected keyword argument 'extra_headers'
+2026-07-28 02:18:24.990 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: BaseEventLoop.create_connection() got an unexpected keyword argument 'extra_headers'
+2026-07-28 02:18:24.990 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 02:18:24.990 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:18:24.990 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:18:24.990 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:18:26.794 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:18:26.794 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:18:26.794 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:18:27.818 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:18:27.818 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:18:27.819 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:18:27.819 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:18:27.819 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:18:27.819 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:18:27.820 | WARNING  | api_quotex.websocket_client:connect:199 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: BaseEventLoop.create_connection() got an unexpected keyword argument 'extra_headers'
+2026-07-28 02:18:27.820 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: BaseEventLoop.create_connection() got an unexpected keyword argument 'extra_headers'
+2026-07-28 02:18:27.820 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 02:18:27.820 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:18:27.820 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:18:27.820 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:18:29.623 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:18:29.623 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:18:29.623 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:18:57.444 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 02:18:57.444 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 02:18:57.444 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 02:18:57.575 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:18:57.575 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:18:57.576 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:18:57.576 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:18:57.585 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:18:57.585 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:18:58.891 | INFO     | api_quotex.websocket_client:connect:185 - Connected to LIVE region successfully
+2026-07-28 02:18:58.891 | ERROR    | api_quotex.websocket_client:_send_handshake:504 - Handshake failed: 'ClientConnection' object has no attribute 'closed'
+2026-07-28 02:18:58.892 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] connection: Handshake failed: 'ClientConnection' object has no attribute 'closed'
+2026-07-28 02:18:58.892 | WARNING  | api_quotex.websocket_client:connect:195 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: 'ClientConnection' object has no attribute 'closed'
+2026-07-28 02:18:58.892 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: 'ClientConnection' object has no attribute 'closed'
+2026-07-28 02:18:59.284 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 02:18:59.284 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:18:59.284 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:18:59.284 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:19:01.086 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:19:01.086 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:19:01.086 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:19:02.106 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:19:02.106 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:19:02.106 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:19:02.106 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:19:02.107 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:19:02.107 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:19:03.392 | INFO     | api_quotex.websocket_client:connect:185 - Connected to LIVE region successfully
+2026-07-28 02:19:03.393 | ERROR    | api_quotex.websocket_client:_send_handshake:504 - Handshake failed: 'ClientConnection' object has no attribute 'closed'
+2026-07-28 02:19:03.393 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] connection: Handshake failed: 'ClientConnection' object has no attribute 'closed'
+2026-07-28 02:19:03.393 | WARNING  | api_quotex.websocket_client:connect:195 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: 'ClientConnection' object has no attribute 'closed'
+2026-07-28 02:19:03.393 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: 'ClientConnection' object has no attribute 'closed'
+2026-07-28 02:19:03.792 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 02:19:03.793 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:19:03.793 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:19:03.793 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:19:05.602 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:19:05.602 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:19:05.602 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:20:03.007 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 02:20:03.007 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 02:20:03.007 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 02:20:03.143 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:20:03.143 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:20:03.143 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:20:03.143 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:20:03.148 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:20:03.148 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:20:04.471 | INFO     | api_quotex.websocket_client:connect:188 - Connected to LIVE region successfully
+2026-07-28 02:20:05.148 | INFO     | api_quotex.websocket_client:_send_handshake:453 - Authentication successful (via instruments/list header)
+2026-07-28 02:20:05.148 | INFO     | api_quotex.client:_on_authenticated:1148 - Authenticated with server
+2026-07-28 02:20:05.149 | INFO     | api_quotex.client:_start_regular_connection:240 - Connected to region: LIVE
+2026-07-28 02:20:05.607 | INFO     | api_quotex.client:_on_assets_updated:886 - Stored 92 assets from instruments/list
+2026-07-28 02:20:05.607 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=authorization/reject, data={}
+2026-07-28 02:20:05.607 | INFO     | api_quotex.websocket_client:_handle_disconnect_message:668 - Received Socket.IO disconnect message ('41')
+2026-07-28 02:20:05.607 | INFO     | api_quotex.websocket_client:_handle_disconnect:974 - Handling WebSocket disconnection
+2026-07-28 02:20:05.607 | INFO     | api_quotex.websocket_client:_handle_disconnect:992 - Attempting reconnection 1/5
+2026-07-28 02:20:07.421 | ERROR    | api_quotex.monitoring:record_error:175 - [MEDIUM] connection: Attempting reconnection 1/5
+2026-07-28 02:20:07.421 | INFO     | api_quotex.websocket_client:receive_messages:344 - WebSocket connection closed normally (code 1005 or OK)
+2026-07-28 02:20:07.421 | INFO     | api_quotex.websocket_client:_handle_disconnect:974 - Handling WebSocket disconnection
+2026-07-28 02:20:07.421 | INFO     | api_quotex.websocket_client:_handle_disconnect:992 - Attempting reconnection 2/5
+2026-07-28 02:20:10.676 | ERROR    | api_quotex.monitoring:record_error:175 - [MEDIUM] connection: Attempting reconnection 2/5
+2026-07-28 02:20:35.243 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Authentication timeout (Code: None)
+2026-07-28 02:20:35.243 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Authentication timeout
+2026-07-28 02:20:35.243 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Authentication timeout
+2026-07-28 02:20:35.243 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:20:37.052 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:20:37.053 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:20:37.053 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:20:38.110 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:20:38.110 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:20:38.110 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:20:38.110 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:20:38.111 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:20:38.111 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:20:39.391 | INFO     | api_quotex.websocket_client:connect:188 - Connected to LIVE region successfully
+2026-07-28 02:20:40.097 | INFO     | api_quotex.websocket_client:_send_handshake:453 - Authentication successful (via instruments/list header)
+2026-07-28 02:20:40.097 | INFO     | api_quotex.client:_on_authenticated:1148 - Authenticated with server
+2026-07-28 02:20:40.097 | INFO     | api_quotex.client:_start_regular_connection:240 - Connected to region: LIVE
+2026-07-28 02:20:40.581 | INFO     | api_quotex.client:_on_assets_updated:886 - Stored 92 assets from instruments/list
+2026-07-28 02:20:40.581 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=authorization/reject, data={}
+2026-07-28 02:20:40.582 | INFO     | api_quotex.websocket_client:_handle_disconnect_message:668 - Received Socket.IO disconnect message ('41')
+2026-07-28 02:20:40.582 | INFO     | api_quotex.websocket_client:_handle_disconnect:974 - Handling WebSocket disconnection
+2026-07-28 02:20:40.582 | INFO     | api_quotex.websocket_client:_handle_disconnect:992 - Attempting reconnection 1/5
+2026-07-28 02:20:42.385 | ERROR    | api_quotex.monitoring:record_error:175 - [MEDIUM] connection: Attempting reconnection 1/5
+2026-07-28 02:20:42.385 | INFO     | api_quotex.websocket_client:receive_messages:344 - WebSocket connection closed normally (code 1005 or OK)
+2026-07-28 02:20:42.386 | INFO     | api_quotex.websocket_client:_handle_disconnect:974 - Handling WebSocket disconnection
+2026-07-28 02:20:42.386 | INFO     | api_quotex.websocket_client:_handle_disconnect:992 - Attempting reconnection 2/5
+2026-07-28 02:20:45.632 | ERROR    | api_quotex.monitoring:record_error:175 - [MEDIUM] connection: Attempting reconnection 2/5
+2026-07-28 02:21:10.154 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Authentication timeout (Code: None)
+2026-07-28 02:21:10.154 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Authentication timeout
+2026-07-28 02:21:10.154 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Authentication timeout
+2026-07-28 02:21:10.155 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:21:11.964 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:21:11.964 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:21:11.964 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:23:17.649 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 02:23:17.650 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 02:23:17.650 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 02:23:17.788 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:23:17.788 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:23:17.788 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:23:17.788 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:23:17.793 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:23:17.793 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:23:19.158 | INFO     | api_quotex.websocket_client:connect:188 - Connected to LIVE region successfully
+2026-07-28 02:23:19.833 | INFO     | api_quotex.websocket_client:_send_handshake:453 - Authentication successful (via instruments/list header)
+2026-07-28 02:23:19.833 | INFO     | api_quotex.client:_on_authenticated:1148 - Authenticated with server
+2026-07-28 02:23:19.834 | INFO     | api_quotex.client:_start_regular_connection:240 - Connected to region: LIVE
+2026-07-28 02:23:20.311 | INFO     | api_quotex.client:_on_assets_updated:886 - Stored 92 assets from instruments/list
+2026-07-28 02:23:20.311 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=authorization/reject, data={}
+2026-07-28 02:23:20.311 | INFO     | api_quotex.websocket_client:_handle_disconnect_message:667 - Received Socket.IO disconnect message ('41')
+2026-07-28 02:23:20.311 | INFO     | api_quotex.websocket_client:_handle_disconnect:973 - Handling WebSocket disconnection
+2026-07-28 02:23:20.311 | INFO     | api_quotex.websocket_client:_handle_disconnect:991 - Attempting reconnection 1/5
+2026-07-28 02:23:22.126 | ERROR    | api_quotex.monitoring:record_error:175 - [MEDIUM] connection: Attempting reconnection 1/5
+2026-07-28 02:23:22.126 | INFO     | api_quotex.websocket_client:receive_messages:344 - WebSocket connection closed normally (code 1005 or OK)
+2026-07-28 02:23:22.127 | INFO     | api_quotex.websocket_client:_handle_disconnect:973 - Handling WebSocket disconnection
+2026-07-28 02:23:22.127 | INFO     | api_quotex.websocket_client:_handle_disconnect:991 - Attempting reconnection 2/5
+2026-07-28 02:23:25.369 | ERROR    | api_quotex.monitoring:record_error:175 - [MEDIUM] connection: Attempting reconnection 2/5
+2026-07-28 02:23:49.860 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Authentication timeout (Code: None)
+2026-07-28 02:23:49.860 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Authentication timeout
+2026-07-28 02:23:49.860 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Authentication timeout
+2026-07-28 02:23:49.860 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:23:51.675 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:23:51.675 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:23:51.675 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:23:52.704 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:23:52.705 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:23:52.705 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:23:52.705 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:23:52.705 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:23:52.705 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:23:54.004 | INFO     | api_quotex.websocket_client:connect:188 - Connected to LIVE region successfully
+2026-07-28 02:23:54.681 | INFO     | api_quotex.websocket_client:_send_handshake:453 - Authentication successful (via instruments/list header)
+2026-07-28 02:23:54.682 | INFO     | api_quotex.client:_on_authenticated:1148 - Authenticated with server
+2026-07-28 02:23:54.682 | INFO     | api_quotex.client:_start_regular_connection:240 - Connected to region: LIVE
+2026-07-28 02:23:55.145 | INFO     | api_quotex.client:_on_assets_updated:886 - Stored 92 assets from instruments/list
+2026-07-28 02:23:55.145 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=authorization/reject, data={}
+2026-07-28 02:23:55.145 | INFO     | api_quotex.websocket_client:_handle_disconnect_message:667 - Received Socket.IO disconnect message ('41')
+2026-07-28 02:23:55.145 | INFO     | api_quotex.websocket_client:_handle_disconnect:973 - Handling WebSocket disconnection
+2026-07-28 02:23:55.145 | INFO     | api_quotex.websocket_client:_handle_disconnect:991 - Attempting reconnection 1/5
+2026-07-28 02:23:56.949 | ERROR    | api_quotex.monitoring:record_error:175 - [MEDIUM] connection: Attempting reconnection 1/5
+2026-07-28 02:23:56.950 | INFO     | api_quotex.websocket_client:receive_messages:344 - WebSocket connection closed normally (code 1005 or OK)
+2026-07-28 02:23:56.950 | INFO     | api_quotex.websocket_client:_handle_disconnect:973 - Handling WebSocket disconnection
+2026-07-28 02:23:56.950 | INFO     | api_quotex.websocket_client:_handle_disconnect:991 - Attempting reconnection 2/5
+2026-07-28 02:24:00.200 | ERROR    | api_quotex.monitoring:record_error:175 - [MEDIUM] connection: Attempting reconnection 2/5
+2026-07-28 02:24:24.714 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Authentication timeout (Code: None)
+2026-07-28 02:24:24.715 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Authentication timeout
+2026-07-28 02:24:24.715 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Authentication timeout
+2026-07-28 02:24:24.715 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:24:26.518 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:24:26.519 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:24:26.519 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:25:24.123 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:25:24.123 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:25:24.123 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:25:24.123 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:25:24.128 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:25:24.129 | INFO     | api_quotex.websocket_client:connect:154 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:25:24.130 | WARNING  | api_quotex.websocket_client:connect:196 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: module 'importlib.metadata' has no attribute 'get_distribution'
+2026-07-28 02:25:24.130 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: module 'importlib.metadata' has no attribute 'get_distribution'
+2026-07-28 02:25:24.130 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 02:25:24.130 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:25:24.130 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:25:24.130 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:25:25.937 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:25:25.937 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:25:25.937 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:25:28.056 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:25:28.056 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:25:28.056 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:25:28.056 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:25:28.061 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:25:28.062 | INFO     | api_quotex.websocket_client:connect:154 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:25:28.062 | WARNING  | api_quotex.websocket_client:connect:196 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: module 'importlib.metadata' has no attribute 'get_distribution'
+2026-07-28 02:25:28.062 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: module 'importlib.metadata' has no attribute 'get_distribution'
+2026-07-28 02:25:28.062 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 02:25:28.062 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:25:28.062 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:25:28.062 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:25:29.877 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:25:29.877 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:25:29.877 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:28:12.998 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 02:28:12.998 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 02:28:12.998 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 02:28:13.129 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:28:13.129 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:28:13.129 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:28:13.129 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:28:13.427 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:28:13.428 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:28:14.729 | INFO     | api_quotex.websocket_client:connect:188 - Connected to LIVE region successfully
+2026-07-28 02:28:15.848 | ERROR    | api_quotex.websocket_client:_send_handshake:484 - Authentication failed: Invalid SSID
+2026-07-28 02:28:15.848 | ERROR    | api_quotex.client:_on_auth_error:1154 - Authentication error: Invalid SSID
+2026-07-28 02:28:15.848 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Authentication error: Invalid SSID
+2026-07-28 02:28:15.848 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Authentication failed: Invalid SSID
+2026-07-28 02:28:15.848 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Authentication failed: Invalid SSID (Code: None)
+2026-07-28 02:28:15.848 | ERROR    | api_quotex.websocket_client:_send_handshake:502 - Handshake failed: Authentication failed: Invalid SSID
+2026-07-28 02:28:15.849 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] connection: Handshake failed: Authentication failed: Invalid SSID
+2026-07-28 02:28:15.849 | WARNING  | api_quotex.websocket_client:connect:198 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: Authentication failed: Invalid SSID
+2026-07-28 02:28:15.849 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: Authentication failed: Invalid SSID
+2026-07-28 02:28:16.239 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 02:28:16.239 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:28:16.239 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:28:16.239 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:28:18.050 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:28:18.050 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:28:18.050 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:28:19.419 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:28:19.419 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:28:19.419 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:28:19.419 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:28:19.419 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:28:19.420 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:28:20.696 | INFO     | api_quotex.websocket_client:connect:188 - Connected to LIVE region successfully
+2026-07-28 02:28:21.792 | ERROR    | api_quotex.websocket_client:_send_handshake:484 - Authentication failed: Invalid SSID
+2026-07-28 02:28:21.793 | ERROR    | api_quotex.client:_on_auth_error:1154 - Authentication error: Invalid SSID
+2026-07-28 02:28:21.793 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Authentication error: Invalid SSID
+2026-07-28 02:28:21.793 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Authentication failed: Invalid SSID
+2026-07-28 02:28:21.793 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Authentication failed: Invalid SSID (Code: None)
+2026-07-28 02:28:21.793 | ERROR    | api_quotex.websocket_client:_send_handshake:502 - Handshake failed: Authentication failed: Invalid SSID
+2026-07-28 02:28:21.793 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] connection: Handshake failed: Authentication failed: Invalid SSID
+2026-07-28 02:28:21.793 | WARNING  | api_quotex.websocket_client:connect:198 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: Authentication failed: Invalid SSID
+2026-07-28 02:28:21.793 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: Authentication failed: Invalid SSID
+2026-07-28 02:28:22.179 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 02:28:22.179 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:28:22.179 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:28:22.179 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:28:23.990 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:28:23.990 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:28:23.990 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:28:56.798 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:28:56.798 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:28:56.798 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:28:56.798 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:28:56.800 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:28:56.800 | INFO     | api_quotex.websocket_client:connect:154 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:28:56.801 | WARNING  | api_quotex.websocket_client:connect:196 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: module 'importlib.metadata' has no attribute 'get_distribution'
+2026-07-28 02:28:56.801 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: module 'importlib.metadata' has no attribute 'get_distribution'
+2026-07-28 02:28:56.801 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 02:28:56.801 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:28:56.801 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:28:56.801 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:28:58.604 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:28:58.604 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:28:58.604 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:29:00.484 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:29:00.484 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:29:00.484 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:29:00.484 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:29:00.485 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:29:00.485 | INFO     | api_quotex.websocket_client:connect:154 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:29:00.486 | WARNING  | api_quotex.websocket_client:connect:196 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: module 'importlib.metadata' has no attribute 'get_distribution'
+2026-07-28 02:29:00.486 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: module 'importlib.metadata' has no attribute 'get_distribution'
+2026-07-28 02:29:00.486 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 02:29:00.486 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:29:00.486 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:29:00.486 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:29:02.294 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:29:02.294 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:29:02.294 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:40:55.462 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 02:40:55.463 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 02:40:55.463 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 02:40:55.595 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:40:55.595 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:40:55.595 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:40:55.595 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:40:55.909 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:40:55.909 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:40:57.252 | INFO     | api_quotex.websocket_client:connect:188 - Connected to LIVE region successfully
+2026-07-28 02:40:58.375 | ERROR    | api_quotex.websocket_client:_send_handshake:484 - Authentication failed: Invalid SSID
+2026-07-28 02:40:58.376 | ERROR    | api_quotex.client:_on_auth_error:1154 - Authentication error: Invalid SSID
+2026-07-28 02:40:58.376 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Authentication error: Invalid SSID
+2026-07-28 02:40:58.376 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Authentication failed: Invalid SSID
+2026-07-28 02:40:58.376 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Authentication failed: Invalid SSID (Code: None)
+2026-07-28 02:40:58.376 | ERROR    | api_quotex.websocket_client:_send_handshake:502 - Handshake failed: Authentication failed: Invalid SSID
+2026-07-28 02:40:58.376 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] connection: Handshake failed: Authentication failed: Invalid SSID
+2026-07-28 02:40:58.376 | WARNING  | api_quotex.websocket_client:connect:198 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: Authentication failed: Invalid SSID
+2026-07-28 02:40:58.376 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: Authentication failed: Invalid SSID
+2026-07-28 02:40:58.771 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 02:40:58.771 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:40:58.771 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:40:58.771 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:41:00.584 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:41:00.584 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:41:00.584 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:41:01.710 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:41:01.710 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:41:01.710 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:41:01.710 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:41:01.710 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:41:01.710 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:41:03.026 | INFO     | api_quotex.websocket_client:connect:188 - Connected to LIVE region successfully
+2026-07-28 02:41:04.151 | ERROR    | api_quotex.websocket_client:_send_handshake:484 - Authentication failed: Invalid SSID
+2026-07-28 02:41:04.151 | ERROR    | api_quotex.client:_on_auth_error:1154 - Authentication error: Invalid SSID
+2026-07-28 02:41:04.151 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Authentication error: Invalid SSID
+2026-07-28 02:41:04.151 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Authentication failed: Invalid SSID
+2026-07-28 02:41:04.152 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Authentication failed: Invalid SSID (Code: None)
+2026-07-28 02:41:04.152 | ERROR    | api_quotex.websocket_client:_send_handshake:502 - Handshake failed: Authentication failed: Invalid SSID
+2026-07-28 02:41:04.152 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] connection: Handshake failed: Authentication failed: Invalid SSID
+2026-07-28 02:41:04.152 | WARNING  | api_quotex.websocket_client:connect:198 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: Authentication failed: Invalid SSID
+2026-07-28 02:41:04.152 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: Authentication failed: Invalid SSID
+2026-07-28 02:41:04.536 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 02:41:04.537 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:41:04.537 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:41:04.537 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:41:06.339 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:41:06.339 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:41:06.339 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:47:13.009 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 02:47:13.009 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 02:47:13.010 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 02:47:13.270 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:47:13.270 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:47:13.270 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:47:13.270 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:47:13.310 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:47:13.310 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:47:13.947 | INFO     | api_quotex.websocket_client:connect:188 - Connected to LIVE region successfully
+2026-07-28 02:47:14.404 | ERROR    | api_quotex.websocket_client:_send_handshake:484 - Authentication failed: Invalid SSID
+2026-07-28 02:47:14.405 | ERROR    | api_quotex.client:_on_auth_error:1154 - Authentication error: Invalid SSID
+2026-07-28 02:47:14.405 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Authentication error: Invalid SSID
+2026-07-28 02:47:14.405 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Authentication failed: Invalid SSID
+2026-07-28 02:47:14.405 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Authentication failed: Invalid SSID (Code: None)
+2026-07-28 02:47:14.405 | ERROR    | api_quotex.websocket_client:_send_handshake:502 - Handshake failed: Authentication failed: Invalid SSID
+2026-07-28 02:47:14.405 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] connection: Handshake failed: Authentication failed: Invalid SSID
+2026-07-28 02:47:14.405 | WARNING  | api_quotex.websocket_client:connect:198 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: Authentication failed: Invalid SSID
+2026-07-28 02:47:14.405 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: Authentication failed: Invalid SSID
+2026-07-28 02:47:14.623 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 02:47:14.623 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:47:14.624 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:47:14.624 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:47:16.439 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:47:16.439 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:47:16.439 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:47:16.881 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 02:47:16.881 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 02:47:16.881 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 02:47:16.881 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 02:47:16.882 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:47:16.882 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 02:47:17.500 | INFO     | api_quotex.websocket_client:connect:188 - Connected to LIVE region successfully
+2026-07-28 02:47:17.962 | ERROR    | api_quotex.websocket_client:_send_handshake:484 - Authentication failed: Invalid SSID
+2026-07-28 02:47:17.962 | ERROR    | api_quotex.client:_on_auth_error:1154 - Authentication error: Invalid SSID
+2026-07-28 02:47:17.962 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Authentication error: Invalid SSID
+2026-07-28 02:47:17.962 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Authentication failed: Invalid SSID
+2026-07-28 02:47:17.963 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Authentication failed: Invalid SSID (Code: None)
+2026-07-28 02:47:17.963 | ERROR    | api_quotex.websocket_client:_send_handshake:502 - Handshake failed: Authentication failed: Invalid SSID
+2026-07-28 02:47:17.963 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] connection: Handshake failed: Authentication failed: Invalid SSID
+2026-07-28 02:47:17.963 | WARNING  | api_quotex.websocket_client:connect:198 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: Authentication failed: Invalid SSID
+2026-07-28 02:47:17.963 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: Authentication failed: Invalid SSID
+2026-07-28 02:47:18.182 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 02:47:18.182 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:47:18.182 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 02:47:18.182 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 02:47:19.997 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 02:47:19.997 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 02:47:19.997 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 03:05:13.466 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 03:05:13.467 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 03:05:13.467 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 03:05:13.616 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 03:05:13.617 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 03:05:13.617 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 03:05:13.617 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 03:05:13.622 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 03:05:13.622 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 03:05:14.182 | INFO     | api_quotex.websocket_client:connect:187 - Connected to LIVE region successfully
+2026-07-28 03:05:15.038 | ERROR    | api_quotex.websocket_client:_send_handshake:483 - Authentication failed: Invalid SSID
+2026-07-28 03:05:15.038 | ERROR    | api_quotex.client:_on_auth_error:1154 - Authentication error: Invalid SSID
+2026-07-28 03:05:15.038 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Authentication error: Invalid SSID
+2026-07-28 03:05:15.038 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Authentication failed: Invalid SSID
+2026-07-28 03:05:15.038 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Authentication failed: Invalid SSID (Code: None)
+2026-07-28 03:05:15.038 | ERROR    | api_quotex.websocket_client:_send_handshake:501 - Handshake failed: Authentication failed: Invalid SSID
+2026-07-28 03:05:15.038 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] connection: Handshake failed: Authentication failed: Invalid SSID
+2026-07-28 03:05:15.039 | WARNING  | api_quotex.websocket_client:connect:197 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: Authentication failed: Invalid SSID
+2026-07-28 03:05:15.039 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: Authentication failed: Invalid SSID
+2026-07-28 03:05:15.254 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 03:05:15.254 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 03:05:15.254 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 03:05:15.254 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 03:05:17.068 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 03:05:17.068 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 03:05:17.068 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 03:05:17.391 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 03:05:17.391 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 03:05:17.391 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 03:05:17.391 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 03:05:17.392 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 03:05:17.392 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket
+2026-07-28 03:05:18.019 | INFO     | api_quotex.websocket_client:connect:187 - Connected to LIVE region successfully
+2026-07-28 03:05:18.472 | ERROR    | api_quotex.websocket_client:_send_handshake:483 - Authentication failed: Invalid SSID
+2026-07-28 03:05:18.472 | ERROR    | api_quotex.client:_on_auth_error:1154 - Authentication error: Invalid SSID
+2026-07-28 03:05:18.472 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Authentication error: Invalid SSID
+2026-07-28 03:05:18.472 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] authentication: Authentication failed: Invalid SSID
+2026-07-28 03:05:18.472 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Authentication failed: Invalid SSID (Code: None)
+2026-07-28 03:05:18.472 | ERROR    | api_quotex.websocket_client:_send_handshake:501 - Handshake failed: Authentication failed: Invalid SSID
+2026-07-28 03:05:18.472 | ERROR    | api_quotex.monitoring:record_error:175 - [CRITICAL] connection: Handshake failed: Authentication failed: Invalid SSID
+2026-07-28 03:05:18.472 | WARNING  | api_quotex.websocket_client:connect:197 - Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: Authentication failed: Invalid SSID
+2026-07-28 03:05:18.472 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to wss://ws2.market-quotex.pro/socket.io/?EIO=3&transport=websocket: Authentication failed: Invalid SSID
+2026-07-28 03:05:18.687 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any WebSocket endpoint (Code: None)
+2026-07-28 03:05:18.687 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 03:05:18.687 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Failed to connect to any WebSocket endpoint
+2026-07-28 03:05:18.687 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 03:05:20.501 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 03:05:20.501 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 03:05:20.501 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 04:16:12.972 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 04:16:12.972 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 04:16:12.972 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 04:16:13.108 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 04:16:13.108 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 04:16:13.108 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 04:16:13.108 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 04:16:13.283 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.qxbroker.com/socket.io/?EIO=3&transport=websocket
+2026-07-28 04:16:13.283 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.qxbroker.com/socket.io/?EIO=3&transport=websocket
+2026-07-28 04:16:14.075 | INFO     | api_quotex.websocket_client:connect:187 - Connected to LIVE region successfully
+2026-07-28 04:16:14.595 | INFO     | api_quotex.websocket_client:_send_handshake:477 - Authentication successful
+2026-07-28 04:16:14.595 | INFO     | api_quotex.client:_on_authenticated:1148 - Authenticated with server
+2026-07-28 04:16:14.596 | INFO     | api_quotex.client:_start_regular_connection:240 - Connected to region: LIVE
+2026-07-28 04:16:14.596 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=settings/list, data=[{'chart_id': 'graph', 'settings': '{"chartId":"graph","chartType":2,"currentExpirationTime":1784441
+2026-07-28 04:16:14.596 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=s_balance/list, data={'liveBalance': 2.36, 'demoBalance': 4302.36, 'tournamentsBalances': {}, 'dayLimit': 0, 'dayBalance'
+2026-07-28 04:16:14.596 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=orders/opened/list, data=[]
+2026-07-28 04:16:14.596 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=s_drawing/load, data={'list': []}
+2026-07-28 04:16:14.619 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=e566d5bc-467f-48a3-b116-a6b34fd862af status=OrderStatus.LOSS profit=-0.89
+2026-07-28 04:16:14.619 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=94c69d4e-0aae-47a7-b919-c541da1f3f74 status=OrderStatus.LOSS profit=-1.0
+2026-07-28 04:16:14.620 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=017cfaf1-39df-46d1-b9a9-31497dd613ad status=OrderStatus.LOSS profit=-2.0
+2026-07-28 04:16:14.620 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=2c9bab5e-eefb-4ca8-af9a-5291f99b2b3e status=OrderStatus.WIN profit=0.92
+2026-07-28 04:16:14.620 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=9885f7c6-6f34-4291-8368-be171d3c4ef7 status=OrderStatus.WIN profit=0.92
+2026-07-28 04:16:14.620 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=f6781dd9-7000-4283-90c5-2513f9b5b29a status=OrderStatus.LOSS profit=-1.0
+2026-07-28 04:16:14.620 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=d0d8461b-1824-438e-bc7f-f786aa23a31c status=OrderStatus.LOSS profit=-1.0
+2026-07-28 04:16:14.621 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=1ded46e9-952e-4732-bb4d-130bed6c5de2 status=OrderStatus.LOSS profit=-1.0
+2026-07-28 04:16:14.621 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=c7d577b9-8734-49e0-880b-501b75d82895 status=OrderStatus.LOSS profit=-1.0
+2026-07-28 04:16:14.621 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=e92db889-62e6-4184-ab57-c601cd3aaf3f status=OrderStatus.WIN profit=0.77
+2026-07-28 04:16:44.632 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Authentication timeout (Code: None)
+2026-07-28 04:16:44.632 | WARNING  | api_quotex.client:_start_regular_connection:265 - Failed to connect to region LIVE: Authentication timeout
+2026-07-28 04:16:44.632 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Failed to connect to LIVE: Authentication timeout
+2026-07-28 04:16:44.632 | INFO     | api_quotex.client:_start_regular_connection:279 - Waiting 1.80 seconds before next reconnect attempt
+2026-07-28 04:16:46.446 | ERROR    | api_quotex.exceptions:__init__:14 - QuotexError: Failed to connect to any region after 1 attempts (Code: None)
+2026-07-28 04:16:46.446 | ERROR    | api_quotex.client:connect:195 - Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 04:16:46.446 | ERROR    | api_quotex.monitoring:record_error:175 - [HIGH] connection: Connection failed: Failed to connect to any region after 1 attempts
+2026-07-28 04:18:26.541 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 04:18:26.541 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 04:18:26.541 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 04:18:26.679 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.qxbroker.com/socket.io/?EIO=3&transport=websocket
+2026-07-28 04:18:27.748 | INFO     | api_quotex.websocket_client:connect:187 - Connected to LIVE region successfully
+2026-07-28 04:18:28.214 | INFO     | api_quotex.websocket_client:_send_handshake:477 - Authentication successful
+2026-07-28 04:18:46.247 | INFO     | api_quotex.websocket_client:disconnect:217 - Disconnecting from WebSocket
+2026-07-28 04:19:52.924 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 04:19:52.924 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 04:19:52.924 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 04:19:53.055 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 04:19:53.056 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 04:19:53.056 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 04:19:53.056 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 04:19:53.065 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.qxbroker.com/socket.io/?EIO=3&transport=websocket
+2026-07-28 04:19:53.065 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.qxbroker.com/socket.io/?EIO=3&transport=websocket
+2026-07-28 04:19:54.007 | INFO     | api_quotex.websocket_client:connect:187 - Connected to LIVE region successfully
+2026-07-28 04:19:54.454 | INFO     | api_quotex.websocket_client:_send_handshake:477 - Authentication successful
+2026-07-28 04:19:54.454 | INFO     | api_quotex.client:_on_authenticated:1148 - Authenticated with server
+2026-07-28 04:19:54.455 | INFO     | api_quotex.client:_start_regular_connection:240 - Connected to region: LIVE
+2026-07-28 04:19:54.488 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=settings/list, data=[{'chart_id': 'graph', 'settings': '{"chartId":"graph","chartType":2,"currentExpirationTime":1784441
+2026-07-28 04:19:54.489 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=s_balance/list, data={'liveBalance': 2.36, 'demoBalance': 4302.36, 'tournamentsBalances': {}, 'dayLimit': 0, 'dayBalance'
+2026-07-28 04:19:54.489 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=s_drawing/load, data={'list': []}
+2026-07-28 04:19:54.489 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=orders/opened/list, data=[]
+2026-07-28 04:19:54.491 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=e566d5bc-467f-48a3-b116-a6b34fd862af status=OrderStatus.LOSS profit=-0.89
+2026-07-28 04:19:54.491 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=94c69d4e-0aae-47a7-b919-c541da1f3f74 status=OrderStatus.LOSS profit=-1.0
+2026-07-28 04:19:54.492 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=017cfaf1-39df-46d1-b9a9-31497dd613ad status=OrderStatus.LOSS profit=-2.0
+2026-07-28 04:19:54.492 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=2c9bab5e-eefb-4ca8-af9a-5291f99b2b3e status=OrderStatus.WIN profit=0.92
+2026-07-28 04:19:54.492 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=9885f7c6-6f34-4291-8368-be171d3c4ef7 status=OrderStatus.WIN profit=0.92
+2026-07-28 04:19:54.492 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=f6781dd9-7000-4283-90c5-2513f9b5b29a status=OrderStatus.LOSS profit=-1.0
+2026-07-28 04:19:54.492 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=d0d8461b-1824-438e-bc7f-f786aa23a31c status=OrderStatus.LOSS profit=-1.0
+2026-07-28 04:19:54.493 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=1ded46e9-952e-4732-bb4d-130bed6c5de2 status=OrderStatus.LOSS profit=-1.0
+2026-07-28 04:19:54.493 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=c7d577b9-8734-49e0-880b-501b75d82895 status=OrderStatus.LOSS profit=-1.0
+2026-07-28 04:19:54.493 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=e92db889-62e6-4184-ab57-c601cd3aaf3f status=OrderStatus.WIN profit=0.77
+2026-07-28 04:20:08.819 | INFO     | api_quotex.client:_on_assets_updated:886 - Stored 92 assets from instruments/list
+2026-07-28 04:20:27.475 | INFO     | api_quotex.client:_start_keep_alive_tasks:354 - Starting keep-alive tasks for regular connection...
+2026-07-28 04:20:27.475 | INFO     | api_quotex.client:_start_regular_connection:247 - Successfully connected and authenticated
+2026-07-28 04:20:27.726 | INFO     | api_quotex.client:_on_balance_data:1234 - Balance updated: uid=90099647, balance=2.36
+2026-07-28 04:20:30.475 | INFO     | api_quotex.client:disconnect:315 - Disconnecting from Quotex...
+2026-07-28 04:20:30.475 | INFO     | api_quotex.websocket_client:disconnect:217 - Disconnecting from WebSocket
+2026-07-28 04:20:30.701 | INFO     | api_quotex.client:disconnect:351 - Disconnected successfully
+2026-07-28 04:50:22.348 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 04:50:22.348 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 04:50:22.348 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 04:50:29.053 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 04:50:29.054 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 04:50:29.054 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 04:51:33.738 | WARNING  | api_quotex.config:_load_config:105 - config.json not found, using default configuration
+2026-07-28 04:51:33.738 | WARNING  | api_quotex.config:_load_session:141 - session.json not found, using default session data
+2026-07-28 04:51:33.738 | INFO     | api_quotex.config:__init__:78 - Config instance initialized successfully
+2026-07-28 04:51:33.872 | INFO     | api_quotex.client:__init__:151 - Initialized Quotex client (demo=False, persistent=False) with enhanced monitoring
+2026-07-28 04:51:33.872 | INFO     | api_quotex.client:connect:181 - Connecting to Quotex...
+2026-07-28 04:51:33.872 | INFO     | api_quotex.client:_start_regular_connection:206 - Starting regular connection...
+2026-07-28 04:51:33.872 | INFO     | api_quotex.client:_start_regular_connection:215 - Live mode: Using non-demo regions: ['LIVE']
+2026-07-28 04:51:33.881 | INFO     | api_quotex.client:_start_regular_connection:235 - Trying region: LIVE with URL: wss://ws2.qxbroker.com/socket.io/?EIO=3&transport=websocket
+2026-07-28 04:51:33.882 | INFO     | api_quotex.websocket_client:connect:158 - Attempting to connect to wss://ws2.qxbroker.com/socket.io/?EIO=3&transport=websocket
+2026-07-28 04:51:34.474 | INFO     | api_quotex.websocket_client:connect:187 - Connected to LIVE region successfully
+2026-07-28 04:51:34.934 | INFO     | api_quotex.websocket_client:_send_handshake:477 - Authentication successful
+2026-07-28 04:51:34.934 | INFO     | api_quotex.client:_on_authenticated:1148 - Authenticated with server
+2026-07-28 04:51:34.935 | INFO     | api_quotex.client:_start_regular_connection:240 - Connected to region: LIVE
+2026-07-28 04:51:34.935 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=s_balance/list, data={'liveBalance': 2.36, 'demoBalance': 4302.36, 'tournamentsBalances': {}, 'dayLimit': 0, 'dayBalance'
+2026-07-28 04:51:34.935 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=settings/list, data=[{'chart_id': 'graph', 'settings': '{"chartId":"graph","chartType":2,"currentExpirationTime":1784441
+2026-07-28 04:51:34.935 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=orders/opened/list, data=[]
+2026-07-28 04:51:34.935 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=s_drawing/load, data={'list': []}
+2026-07-28 04:51:34.952 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=e566d5bc-467f-48a3-b116-a6b34fd862af status=OrderStatus.LOSS profit=-0.89
+2026-07-28 04:51:34.952 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=94c69d4e-0aae-47a7-b919-c541da1f3f74 status=OrderStatus.LOSS profit=-1.0
+2026-07-28 04:51:34.952 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=017cfaf1-39df-46d1-b9a9-31497dd613ad status=OrderStatus.LOSS profit=-2.0
+2026-07-28 04:51:34.953 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=2c9bab5e-eefb-4ca8-af9a-5291f99b2b3e status=OrderStatus.WIN profit=0.92
+2026-07-28 04:51:34.953 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=9885f7c6-6f34-4291-8368-be171d3c4ef7 status=OrderStatus.WIN profit=0.92
+2026-07-28 04:51:34.953 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=f6781dd9-7000-4283-90c5-2513f9b5b29a status=OrderStatus.LOSS profit=-1.0
+2026-07-28 04:51:34.953 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=d0d8461b-1824-438e-bc7f-f786aa23a31c status=OrderStatus.LOSS profit=-1.0
+2026-07-28 04:51:34.953 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=1ded46e9-952e-4732-bb4d-130bed6c5de2 status=OrderStatus.LOSS profit=-1.0
+2026-07-28 04:51:34.954 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=c7d577b9-8734-49e0-880b-501b75d82895 status=OrderStatus.LOSS profit=-1.0
+2026-07-28 04:51:34.954 | INFO     | api_quotex.client:_on_order_closed:1441 - Order CLOSED: req=None id=e92db889-62e6-4184-ab57-c601cd3aaf3f status=OrderStatus.WIN profit=0.77
+2026-07-28 04:51:35.353 | INFO     | api_quotex.client:_on_json_data:1643 - Received JSON event: type=s_chart_notification/get, data=[{'id': '1200565182997.1187', 'price': 0.55564, 'asset': 'CADCHF_otc'}]
+2026-07-28 04:52:07.870 | INFO     | api_quotex.client:_start_keep_alive_tasks:354 - Starting keep-alive tasks for regular connection...
+2026-07-28 04:52:07.870 | INFO     | api_quotex.client:_start_regular_connection:247 - Successfully connected and authenticated
+2026-07-28 04:52:08.085 | INFO     | api_quotex.client:_on_balance_data:1234 - Balance updated: uid=90099647, balance=2.36
+2026-07-28 04:52:10.543 | INFO     | api_quotex.client:disconnect:315 - Disconnecting from Quotex...
+2026-07-28 04:52:10.544 | INFO     | api_quotex.websocket_client:disconnect:217 - Disconnecting from WebSocket
+2026-07-28 04:52:10.757 | INFO     | api_quotex.client:disconnect:351 - Disconnected successfully

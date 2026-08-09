@@ -234,15 +234,24 @@ async def timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE)
     chart_b64 = None
     if os.getenv("ENABLE_CHART_CAPTURE", "1") == "1":
         try:
-            import chart_capture
-            logger.info(f"Capturing live chart for {pair} (tf={tf}s)...")
-            chart_b64 = await chart_capture.capture_chart_image(pair, timeframe_seconds=tf, timeout=60.0)
-            if chart_b64:
-                logger.info(f"Chart captured for {pair} ({len(chart_b64)} b64 chars) -> attached to Diffusion Gemma")
+            import chart_render
+            candles = (tech_data or {}).get("candles")
+            if not candles:
+                logger.warning(f"No candle data for {pair}; skipping chart render")
             else:
-                logger.warning(f"Chart capture failed/blank for {pair}; proceeding without image")
+                logger.info(f"Rendering chart for {pair} from {len(candles)} candles (tf={tf}s)...")
+                chart_b64 = chart_render.render_chart_to_base64(
+                    candles,
+                    summary=(tech_data or {}).get("summary"),
+                    token=pair,
+                    timeframe=tf,
+                )
+                if chart_b64:
+                    logger.info(f"Chart rendered for {pair} ({len(chart_b64)} b64 chars) -> attached to Diffusion Gemma")
+                else:
+                    logger.warning(f"Chart render failed for {pair}; proceeding without image")
         except Exception as e:
-            logger.warning(f"Chart capture error for {pair}: {e}")
+            logger.warning(f"Chart render error for {pair}: {e}")
 
     ai_result = await bot_main.query_all_models(
         tech_data["summary"],
