@@ -1515,9 +1515,22 @@ async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: 
             conf = int(res.get("confidence", 50))
             confidences.append(conf)
             reason = res.get("reason", "")
-            reasons.append(f"{name}: {direction} ({conf}%) - {reason}")
+            line = f"{name}: {direction} ({conf}%) - {reason}"
+            chart_analysis = res.get("chart_analysis") or {}
+            if isinstance(chart_analysis, dict) and chart_analysis.get("visual_trend"):
+                ca = " | ".join(
+                    f"{k}: {v}" for k, v in (
+                        ("Visual chart", chart_analysis.get("visual_trend")),
+                        ("Levels seen", chart_analysis.get("key_levels_seen")),
+                        ("Pattern at price", chart_analysis.get("pattern_at_price")),
+                        ("Telemetry agreement", chart_analysis.get("telemetry_agreement")),
+                        ("Visual override", chart_analysis.get("visual_signal_override")),
+                    ) if v
+                )
+                line = f"{line}\n   👁️ CHART SEEN BY {name}: {ca}"
+            reasons.append(line)
             model_details.append({"model": name, "direction": direction, "confidence": conf})
-            logger.info(f"{name} votes {direction} ({conf}%)")
+            logger.info(f"{name} votes {direction} ({conf}%)" + (f" | chart: {chart_analysis.get('visual_trend')}" if chart_analysis.get("visual_trend") else ""))
         else:
             logger.warning(f"{name} returned invalid direction: {res.get('direction')}")
 
