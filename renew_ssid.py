@@ -807,82 +807,54 @@ async def _camoufox_login(headed: bool = False) -> str | None:
             except Exception:
                 pass
 
-            # Find email input by coordinates
-            email_pos = await page.evaluate("""
-                () => {
-                    var els = document.querySelectorAll('input[name="email"]');
-                    for (var el of els) {
-                        var r = el.getBoundingClientRect();
-                        if (r.width > 50 && r.height > 10) return {x: r.x+r.width/2, y: r.y+r.height/2};
-                    }
-                    return null;
-                }
-            """)
-            if not email_pos:
-                logger.error("[3] Email input not found")
+            # Fill login form via JS (robust vs Cloudflare/coordinate-clicks hanging)
+            _FILL_LOGIN_JS = """
+            (args) => {
+                var emails = document.querySelectorAll('input[name="email"]');
+                var passes = document.querySelectorAll('input[name="password"]');
+                if (!emails.length || !passes.length) return "no inputs found";
+                var email = emails.length > 1 ? emails[1] : emails[0];
+                var pass = passes.length > 1 ? passes[1] : passes[0];
+                if (!email.offsetParent || !pass.offsetParent) return "inputs not visible";
+                email.focus();
+                email.value = args[0];
+                email.dispatchEvent(new Event('input', { bubbles: true }));
+                email.dispatchEvent(new Event('change', { bubbles: true }));
+                pass.focus();
+                pass.value = args[1];
+                pass.dispatchEvent(new Event('input', { bubbles: true }));
+                pass.dispatchEvent(new Event('change', { bubbles: true }));
+                return "filled";
+            }
+            """
+            fill_res = await page.evaluate(_FILL_LOGIN_JS, [email, password])
+            logger.info("[3] Login form fill: %s", fill_res)
+            if fill_res != "filled":
+                logger.error("[3] Email/password input not found or not visible")
                 return None
 
-            logger.info("[3] Typing email...")
-            await page.mouse.click(email_pos["x"], email_pos["y"])
-            await asyncio.sleep(0.5)
-            await page.keyboard.press("Control+a")
-            await page.keyboard.press("Backspace")
-            await page.keyboard.type(email, delay=50)
-
-            # Find password input by coordinates
-            pass_pos = await page.evaluate("""
-                () => {
-                    var els = document.querySelectorAll('input[name="password"]');
-                    for (var el of els) {
-                        var r = el.getBoundingClientRect();
-                        if (r.width > 50 && r.height > 10) return {x: r.x+r.width/2, y: r.y+r.height/2};
-                    }
-                    return null;
+            # Click Sign in via JS (prefer form submit, fall back to button click)
+            _CLICK_SIGNIN_JS = """
+            () => {
+                var form = document.querySelector('form');
+                if (form && form.requestSubmit) {
+                    try { form.requestSubmit(); return "requestSubmit"; } catch (e) {}
                 }
-            """)
-            if not pass_pos:
-                logger.error("[4] Password input not found")
-                return None
-
-            logger.info("[4] Typing password...")
-            await page.mouse.click(pass_pos["x"], pass_pos["y"])
-            await asyncio.sleep(0.5)
-            await page.keyboard.press("Control+a")
-            await page.keyboard.press("Backspace")
-            await page.keyboard.type(password, delay=50)
-
-            # Find Sign in button by coordinates — try multiple selectors
-            btn_pos = await page.evaluate("""
-                () => {
-                    // Try submit buttons first
-                    var selectors = ['button[type="submit"]', 'button', 'input[type="submit"]', 'a.button', '.btn'];
-                    for (var sel of selectors) {
-                        var btns = document.querySelectorAll(sel);
-                        for (var b of btns) {
-                            var r = b.getBoundingClientRect();
-                            if (r.width < 50 || r.height < 20) continue;
-                            var txt = (b.innerText || b.value || '').trim().toLowerCase();
-                            if (txt.includes('sign') || txt.includes('log') || txt.includes('enter') || txt.includes('submit'))
-                                return {x: r.x+r.width/2, y: r.y+r.height/2, txt: (b.innerText || b.value || '').trim()};
-                        }
+                var btns = document.querySelectorAll('button, input[type="submit"]');
+                for (var i = 0; i < btns.length; i++) {
+                    var b = btns[i];
+                    var txt = (b.innerText || b.value || '').trim().toLowerCase();
+                    if (txt.includes('sign') || txt.includes('log') || txt.includes('enter') || txt.includes('submit')) {
+                        if (b.offsetParent !== null) { b.click(); return "clicked:" + txt; }
                     }
-                    // Fallback: find the first large visible button in the form area
-                    var allBtns = document.querySelectorAll('button');
-                    for (var b of allBtns) {
-                        var r = b.getBoundingClientRect();
-                        if (r.width > 100 && r.height > 35 && r.y > 200)
-                            return {x: r.x+r.width/2, y: r.y+r.height/2, txt: b.innerText.trim()};
-                    }
-                    return null;
                 }
-            """)
-            if not btn_pos:
-                logger.error("[5] Sign in button not found")
-                return None
+                return "no submit found";
+            }
+            """
+            click_res = await page.evaluate(_CLICK_SIGNIN_JS)
+            logger.info("[5] Sign-in submit: %s", click_res)
 
             login_ts = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=10)
-            logger.info("[5] Clicking Sign in...")
-            await page.mouse.click(btn_pos["x"], btn_pos["y"])
             logger.info("[5] CLICKED!")
 
             # Watch for OTP or /trade
@@ -891,13 +863,16 @@ async def _camoufox_login(headed: bool = False) -> str | None:
             for i in range(90):
                 await asyncio.sleep(2)
                 elapsed = (i+1)*2
-                state = await page.evaluate("""
-                    () => ({
-                        url: location.href,
-                        isTrade: location.href.includes('/trade'),
-                        otpVisible: Array.from(document.querySelectorAll('input[name="code"]')).some(el => el.offsetParent !== null && window.getComputedStyle(el).display !== 'none')
-                    })
-                """)
+                try:
+                    state = await asyncio.wait_for(page.evaluate("""
+                        () => ({
+                            url: location.href,
+                            isTrade: location.href.includes('/trade'),
+                            otpVisible: Array.from(document.querySelectorAll('input[name="code"]')).some(el => el.offsetParent !== null && window.getComputedStyle(el).display !== 'none')
+                        })
+                    """), timeout=15)
+                except Exception:
+                    continue
                 if state["isTrade"]:
                     logger.info("[6] [%ds] ON TRADE!", elapsed)
                     break
