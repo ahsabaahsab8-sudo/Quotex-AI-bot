@@ -700,8 +700,8 @@ def _ensure_socks_relay() -> dict | None:
     Set CAMOUFOX_USE_PROXY=false in .env to disable proxy for Camoufox too.
     """
     global _SOCKS_RELAY
-    if os.getenv("CAMOUFOX_USE_PROXY", "true").lower() in ("false", "0", "no"):
-        logger.info("Camoufox proxy DISABLED (CAMOUFOX_USE_PROXY=false)")
+    if os.getenv("CAMOUFOX_USE_PROXY", "false").lower() not in ("true", "1", "yes"):
+        logger.info("Camoufox proxy DISABLED (using VPS own IP, no proxy)")
         return None
     proxy_env = os.getenv("CAMOUFOX_PROXY") or os.getenv("QUOTEX_PROXY") or os.getenv("TELEGRAM_PROXY")
     if not proxy_env:
@@ -743,29 +743,35 @@ async def _camoufox_login(headed: bool = False) -> str | None:
     try:
         proxy_cfg = _ensure_socks_relay()
 
+        user_prefs = {
+            "gfx.xrender.enabled": False,
+            "layers.acceleration.disabled": True,
+            "gfx.canvas.accelerated": False,
+            "webgl.disabled": True,
+            "webgl.enable-webgl2": False,
+            "gfx.x11-egl.force-disabled": True,
+            "security.prompt_for_key_storage_type": False,
+            "signon.masterPasswordRequired": False,
+            "signon.rememberSignons": False,
+            "signon.autofillForms": False,
+            "security.default_personal_cert": "Select Automatically",
+            "accessibility.force_disabled": 1,
+            "browser.downdown.enabled": True,
+        }
+        if proxy_cfg:
+            user_prefs["network.proxy.type"] = 1
+            user_prefs["network.proxy.no_proxies_on"] = "localhost, 127.0.0.1"
+        else:
+            user_prefs["network.proxy.type"] = 0
+            user_prefs["network.proxy.no_proxies_on"] = ""
+
         async with AsyncCamoufox(
             humanize=True,
             geoip=False,
             disable_coop=True,
             headless=not headed,
             proxy=proxy_cfg,
-            firefox_user_prefs={
-                "network.proxy.type": 1,
-                "network.proxy.no_proxies_on": "localhost, 127.0.0.1",
-                "gfx.xrender.enabled": False,
-                "layers.acceleration.disabled": True,
-                "gfx.canvas.accelerated": False,
-                "webgl.disabled": True,
-                "webgl.enable-webgl2": False,
-                "gfx.x11-egl.force-disabled": True,
-                "security.prompt_for_key_storage_type": False,
-                "signon.masterPasswordRequired": False,
-                "signon.rememberSignons": False,
-                "signon.autofillForms": False,
-                "security.default_personal_cert": "Select Automatically",
-                "accessibility.force_disabled": 1,
-                "browser.downdown.enabled": True,
-            },
+            firefox_user_prefs=user_prefs,
         ) as browser:
             page = await browser.new_page()
 
@@ -787,7 +793,7 @@ async def _camoufox_login(headed: bool = False) -> str | None:
                     await asyncio.sleep(5)
 
             # Wait: 30s first time (direct VPS is fast), 120s if proxy is slow
-            using_proxy = os.getenv("CAMOUFOX_USE_PROXY", "true").lower() not in ("false", "0", "no")
+            using_proxy = os.getenv("CAMOUFOX_USE_PROXY", "false").lower() in ("true", "1", "yes")
             wait_time = 120 if (first_load and using_proxy) else (30 if first_load else 40)
             first_load = False
             logger.info("[2] Waiting %ds for page render...", wait_time)
@@ -996,7 +1002,7 @@ async def renew_ssid(force_playwright: bool = False, headed: bool = False) -> st
 
     last_err = None
     for attempt in range(1, MAX_RETRIES + 1):
-        logger.info("SSID renewal attempt %d/%d (Camoufox via proxy)...", attempt, MAX_RETRIES)
+        logger.info("SSID renewal attempt %d/%d (Camoufox direct, no proxy)...", attempt, MAX_RETRIES)
         try:
             token = await _camoufox_login(headed=headed)
             if token:
