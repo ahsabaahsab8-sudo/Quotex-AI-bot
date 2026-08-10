@@ -772,14 +772,6 @@ async def _camoufox_login(headed: bool = False) -> str | None:
         ) as browser:
             page = await browser.new_page()
 
-            async def block_qxbroker_nav(route):
-                url = route.request.url
-                if "qxbroker.com" in url and route.request.resource_type == "document":
-                    await route.abort()
-                else:
-                    await route.continue_()
-            await page.route("**/*", block_qxbroker_nav)
-
             for attempt in range(10):
                 try:
                     logger.info("[1] Loading sign-in page...")
@@ -788,6 +780,15 @@ async def _camoufox_login(headed: bool = False) -> str | None:
                 except Exception as e:
                     logger.warning("[1] Nav failed: %s", e)
                     await asyncio.sleep(5)
+
+            # Wait for Cloudflare challenge to clear (challenge URL has __cf_chl_tk)
+            try:
+                for _ in range(60):
+                    if "__cf_chl_tk" not in page.url.lower():
+                        break
+                    await asyncio.sleep(3)
+            except Exception:
+                pass
 
             # Wait: 30s first time (direct VPS is fast), 120s if proxy is slow
             using_proxy = os.getenv("CAMOUFOX_USE_PROXY", "false").lower() in ("true", "1", "yes")
