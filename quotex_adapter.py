@@ -126,13 +126,13 @@ async def _connect_with_token(email, token, session):
     client = Quotex(
         email=email,
         password='not-needed',
-        host='market-quotex.pro',
+        host='market-qx.trade',
         lang='en',
-        wss_url_override='wss://ws2.qxbroker.com/socket.io/?EIO=3&transport=websocket',
+        wss_url_override='wss://ws2.market-qx.trade/socket.io/?EIO=3&transport=websocket',
         proxies=proxies,
         reconnect_policy=reconnect_policy,
     )
-    client.set_account_mode("REAL")
+    client.set_account_mode("PRACTICE")
     client.set_session(
         user_agent=session.get("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"),
         cookies=session.get("cookies"),

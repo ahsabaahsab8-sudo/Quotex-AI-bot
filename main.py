@@ -1282,7 +1282,7 @@ async def query_glm_analysis(tech_data: dict, chart_b64: str | None = None) -> d
     try:
         completion = await asyncio.to_thread(
             nvidia_client.chat.completions.create,
-            model="google/diffusiongemma-26b-a4b-it",
+            model="meta/muse-glimmer-30b",
             messages=[
                 {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'."},
                 {"role": "user", "content": user_content}
@@ -1295,10 +1295,10 @@ async def query_glm_analysis(tech_data: dict, chart_b64: str | None = None) -> d
         data = _coerce_dict(json.loads(text))
         if isinstance(data, dict):
             ca = data.get("chart_analysis")
-            logger.info(f"Diffusion Gemma response chart_analysis: " + (json.dumps(ca) if ca else "MISSING"))
+            logger.info(f"Muse Glimmer response chart_analysis: " + (json.dumps(ca) if ca else "MISSING"))
         return data
     except Exception as e:
-        logger.error(f"Diffusion Gemma failed: {e}")
+        logger.error(f"Muse Glimmer failed: {e}")
         return None
 
 
@@ -1506,7 +1506,7 @@ def get_pair_category(pair_code: str) -> str:
 async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: str = None, chart_b64: str | None = None) -> dict:
     summary = tech_data.get("summary", tech_data) if isinstance(tech_data, dict) else tech_data
 
-    logger.info(f"Voting system: Running 3 models for {pair_code}" + (" (with chart image for Diffusion Gemma)" if chart_b64 else ""))
+    logger.info(f"Voting system: Running 3 models for {pair_code}" + (" (with chart image for Muse Glimmer)" if chart_b64 else ""))
 
     results = await asyncio.gather(
         query_diffusion_gemma_analysis(summary, chart_b64=chart_b64),
@@ -1518,7 +1518,7 @@ async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: 
     votes = {"BUY": 0, "SELL": 0}
     confidences = []
     reasons = []
-    model_names = ["Diffusion Gemma 26B", "DeepSeek V4 Flash", "MiMo V2.5"]
+    model_names = ["Muse Glimmer 30B", "DeepSeek V4 Flash", "MiMo V2.5"]
     model_details = []
 
     for i, (name, res) in enumerate(zip(model_names, results)):
