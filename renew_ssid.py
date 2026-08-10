@@ -761,9 +761,6 @@ async def _camoufox_login(headed: bool = False) -> str | None:
         if proxy_cfg:
             user_prefs["network.proxy.type"] = 1
             user_prefs["network.proxy.no_proxies_on"] = "localhost, 127.0.0.1"
-        else:
-            user_prefs["network.proxy.type"] = 0
-            user_prefs["network.proxy.no_proxies_on"] = ""
 
         async with AsyncCamoufox(
             humanize=True,
