@@ -807,9 +807,11 @@ async def _camoufox_login(headed: bool = False) -> str | None:
             except Exception:
                 pass
 
-            # Fill login form via JS (robust vs Cloudflare/coordinate-clicks hanging)
+            # Fill login form via JS (robust vs Cloudflare/coordinate-clicks hanging).
+            # Use the native value setter so React-controlled inputs register the value.
             _FILL_LOGIN_JS = """
             (args) => {
+                var nativeSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
                 var emails = document.querySelectorAll('input[name="email"]');
                 var passes = document.querySelectorAll('input[name="password"]');
                 if (!emails.length || !passes.length) return "no inputs found";
@@ -817,36 +819,53 @@ async def _camoufox_login(headed: bool = False) -> str | None:
                 var pass = passes.length > 1 ? passes[1] : passes[0];
                 if (!email.offsetParent || !pass.offsetParent) return "inputs not visible";
                 email.focus();
-                email.value = args[0];
+                nativeSet.call(email, args[0]);
                 email.dispatchEvent(new Event('input', { bubbles: true }));
                 email.dispatchEvent(new Event('change', { bubbles: true }));
                 pass.focus();
-                pass.value = args[1];
+                nativeSet.call(pass, args[1]);
                 pass.dispatchEvent(new Event('input', { bubbles: true }));
                 pass.dispatchEvent(new Event('change', { bubbles: true }));
-                return "filled";
+                return "filled:" + email.value.length + ":" + pass.value.length;
             }
             """
             fill_res = await page.evaluate(_FILL_LOGIN_JS, [email, password])
             logger.info("[3] Login form fill: %s", fill_res)
-            if fill_res != "filled":
+            if not fill_res or not fill_res.startswith("filled"):
                 logger.error("[3] Email/password input not found or not visible")
                 return None
 
-            # Click Sign in via JS (prefer form submit, fall back to button click)
+            # Click Sign in via JS - click the REAL button so React onClick fires
             _CLICK_SIGNIN_JS = """
             () => {
-                var form = document.querySelector('form');
-                if (form && form.requestSubmit) {
-                    try { form.requestSubmit(); return "requestSubmit"; } catch (e) {}
-                }
-                var btns = document.querySelectorAll('button, input[type="submit"]');
+                var btns = document.querySelectorAll('button, input[type="submit"], a[class*="btn"], .modal-sign__button');
+                var candidates = [];
                 for (var i = 0; i < btns.length; i++) {
                     var b = btns[i];
+                    if (b.offsetParent === null && !(window.getComputedStyle(b).visibility === 'visible')) continue;
                     var txt = (b.innerText || b.value || '').trim().toLowerCase();
-                    if (txt.includes('sign') || txt.includes('log') || txt.includes('enter') || txt.includes('submit')) {
-                        if (b.offsetParent !== null) { b.click(); return "clicked:" + txt; }
+                    if (txt.includes('sign in') || txt.includes('log in') || txt === 'sign in' || txt === 'login' ||
+                        txt.includes('sign-in') || txt.includes('enter') || txt.includes('submit') ||
+                        txt.includes('log-in')) {
+                        candidates.push(b);
                     }
+                }
+                if (candidates.length) {
+                    var btn = candidates[0];
+                    btn.click();
+                    btn.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true, view: window}));
+                    btn.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true, view: window}));
+                    btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}));
+                    return "clicked:" + (btn.innerText || btn.value || '').trim();
+                }
+                var form = document.querySelector('form');
+                if (form && form.requestSubmit) {
+                    try { form.requestSubmit(); return "requestSubmit-fallback"; } catch (e) {}
+                }
+                var all = document.querySelectorAll('button[type="submit"]');
+                if (all.length && all[0].offsetParent !== null) {
+                    all[0].click();
+                    return "clicked:submit";
                 }
                 return "no submit found";
             }
