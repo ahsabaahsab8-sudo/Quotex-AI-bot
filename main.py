@@ -28,6 +28,21 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
+# ─── LATENCY / STALENESS KNOBS ─────────────────────────────────────────
+# Fast-vote: stop waiting for all models as soon as 2 agree in the same
+# direction (majority reached). Hard deadline: whatever votes we have by then
+# are used. These prevent a single slow 30B image model from making the
+# signal 4 minutes stale.
+AI_VOTE_DEADLINE_SECONDS = float(os.getenv("AI_VOTE_DEADLINE_SECONDS", "60"))
+AI_MODEL_TIMEOUT_SECONDS = float(os.getenv("AI_MODEL_TIMEOUT_SECONDS", "90"))
+AI_OUTPUT_MAX_TOKENS = int(os.getenv("AI_OUTPUT_MAX_TOKENS", "2048"))
+# Data older than this many candle timeframes is considered stale before signaling.
+DATA_AGE_MULTIPLIER = float(os.getenv("DATA_AGE_MULTIPLIER", "1.5"))
+# Chart-capable model for the 3-model vote: "kilo" (Step 3.7 Flash) or "gemini" (Gemini Flash).
+# Benchmarked on the same chart + prompt: gemini=3.4s (chart filled), kilo-step=~38s flaky,
+# kilo-nemotron=66s (no chart). gemini is the fast, reliable default.
+CHART_MODEL = os.getenv("CHART_MODEL", "gemini")
+
 
 # ─── AUTO OTP READER FROM EMAIL ──────────────────────────────────────
 
@@ -928,6 +943,8 @@ You MUST perform step-by-step mathematical derivations. Fill out the "chain_of_t
 
 ### OUTPUT RULES - STRICT JSON ONLY
 You MUST output only a valid JSON object. No extra text.
+### CONCISE OUTPUT REQUIREMENT (CRITICAL FOR REAL-TIME)
+This is a real-time trading pipeline. Every string field MUST be short and concise (≤ 30 words). No essays, no long derivations. The shorter the response, the fresher the signal.
 {{
   "token": "string",
   "direction": "string, strictly 'BUY' or 'SELL'",
@@ -1094,10 +1111,10 @@ If you REVERSE, provide your own direction and confidence.
 """
 
 
-# ─── AI: MIMO V2.5 VIA ZEN (was Gemini 3.6 Flash) ─────────────────────
+# ─── AI: NEMOTRON 3.5 LIGHTNING 30B VIA NVIDIA (replaces MiMo V2.5 / Zen) ──
 
 MIMO_ZEN_KEY = os.getenv("MIMO_ZEN_KEY", "sk-9wvf1O4OyqST9iQzklxU2PQOPxlw8I0hKEtakaDKgJNg6wOFrRvRY0146DJsdaoD")
-mimo_client = OpenAI(base_url="https://opencode.ai/zen/v1", api_key=MIMO_ZEN_KEY, timeout=120.0)
+mimo_client = OpenAI(base_url="https://api.kilo.ai/api/gateway", api_key=os.getenv("KILO_API_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbnYiOiJwcm9kdWN0aW9uIiwia2lsb1VzZXJJZCI6ImQyYjRjOTIwLTYwYTAtNGQwZS04ZjliLWQ4MDAyNjI5MzIwMCIsImFwaVRva2VuUGVwcGVyIjpudWxsLCJ2ZXJzaW9uIjozLCJpYXQiOjE3ODY1MTk4MjEsImV4cCI6MTk0NDE5OTgyMX0.WhsCfQWhMCyJzeacsekuRTurBjqQr6iEUwx4ln-SK34"), timeout=120.0)
 
 
 def _coerce_dict(data):
@@ -1108,18 +1125,50 @@ def _coerce_dict(data):
     return None
 
 
+def _extract_json_obj(text: str) -> str | None:
+    """Pull the JSON object '{...}' out of a noisy model response (thinking preamble, fences, etc.)."""
+    if not text:
+        return None
+    text = text.replace("```json", "").replace("```", "").strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    return text[start:end + 1]
+
+
+def _parse_model_output(text: str) -> dict | None:
+    """Best-effort parse of a model's answer to a dict.
+
+    Handles fenced/clean JSON (json.loads) and the single-quoted dicts some
+    models (Nemotron) return instead of strict JSON (ast.literal_eval).
+    """
+    json_str = _extract_json_obj(text)
+    if not json_str:
+        return None
+    try:
+        return _coerce_dict(json.loads(json_str))
+    except (json.JSONDecodeError, ValueError):
+        pass
+    try:
+        import ast
+        return _coerce_dict(ast.literal_eval(json_str))
+    except (SyntaxError, ValueError):
+        return None
+
+
 async def query_gemini_analysis(tech_data: dict) -> dict | None:
     data_json = json.dumps([tech_data], indent=2)
     prompt = TRADING_PROMPT_TEMPLATE.format(data_json=data_json)
     try:
         completion = await asyncio.to_thread(
             mimo_client.chat.completions.create,
-            model="mimo-v2.5-free",
+            model="nvidia/nemotron-3.5-lightning:free",
             messages=[
                 {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.2, max_tokens=8192
+            temperature=0.2, max_tokens=AI_OUTPUT_MAX_TOKENS
         )
         text = completion.choices[0].message.content.strip()
         if not text:
@@ -1155,7 +1204,7 @@ async def query_step_analysis(tech_data: dict, retries: int = 2) -> dict | None:
                     {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.2, top_p=0.7, max_tokens=8192,
+                temperature=0.2, top_p=0.7, max_tokens=AI_OUTPUT_MAX_TOKENS,
             )
             text = completion.choices[0].message.content
             if not text:
@@ -1287,7 +1336,7 @@ async def query_glm_analysis(tech_data: dict, chart_b64: str | None = None) -> d
                 {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'."},
                 {"role": "user", "content": user_content}
             ],
-            temperature=0.2, top_p=0.7, max_tokens=8192,
+            temperature=0.2, top_p=0.7, max_tokens=AI_OUTPUT_MAX_TOKENS,
             response_format={"type": "json_schema", "json_schema": {"name": "trading_analysis", "strict": True, "schema": schema}}
         )
         text = completion.choices[0].message.content.strip()
@@ -1305,6 +1354,162 @@ async def query_glm_analysis(tech_data: dict, chart_b64: str | None = None) -> d
 # Clear alias: Diffusion Gemma (Google) is the model behind query_glm_analysis.
 # Kept backwards-compatible so test/scratch scripts calling query_glm_analysis still work.
 query_diffusion_gemma_analysis = query_glm_analysis
+
+
+# ─── AI: GEMINI FLASH (FAST CHART-CAPABLE) VIA GOOGLE ─────────────────
+
+GEMINI_FLASH_API_KEY = os.getenv("GEMINI_FLASH_API_KEY", "AIzaSyCdU-8xsePobK9Z8wk7DF6Ao0GRsV5-0PI")
+# NOTE: the requested "gemini-2.5-flash" returns 404 on this key (deprecated for
+# new users). "gemini-3.1-flash-lite" is the fastest chart-capable flash model
+# available on the key (~4s, fills chart_analysis). Override via .env if needed.
+GEMINI_FLASH_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-3.1-flash-lite")
+
+
+async def query_gemini_flash_analysis(tech_data: dict, chart_b64: str | None = None, retries: int = 2) -> dict | None:
+    """Chart-capable analyst on Gemini Flash — replaces the slow 30B Muse Glimmer.
+
+    Same prompt, same chart attachment, same JSON schema — but ~4s and capped at
+    AI_OUTPUT_MAX_TOKENS, so the chart model no longer throttles the signal.
+    Uses the native Gemini generateContent API (OpenAI-compat endpoint rejects
+    older flash models on this key).
+    """
+    data_json = json.dumps([tech_data], indent=2)
+    prompt = TRADING_PROMPT_TEMPLATE.format(data_json=data_json)
+    if chart_b64:
+        prompt = prompt.replace(
+            "### TIMEFRAME CONTEXT",
+            CHART_IMAGE_PROMPT_SECTION + "\n\n### TIMEFRAME CONTEXT"
+        )
+        parts = [
+            {"inline_data": {"mime_type": "image/png", "data": chart_b64}},
+            {"text": prompt},
+        ]
+    else:
+        parts = [{"text": prompt}]
+
+    payload = {
+        "contents": [{"role": "user", "parts": parts}],
+        "systemInstruction": {"parts": [{"text": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'."}]},
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "maxOutputTokens": AI_OUTPUT_MAX_TOKENS,
+            "temperature": 0.2,
+        },
+    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_FLASH_MODEL}:generateContent"
+
+    for attempt in range(retries + 1):
+        try:
+            response = await asyncio.to_thread(
+                requests.post, url, params={"key": GEMINI_FLASH_API_KEY}, json=payload, timeout=90.0
+            )
+            if response.status_code != 200:
+                logger.warning(f"Gemini Flash attempt {attempt+1} failed ({response.status_code}): {response.text[:300]}")
+                if attempt < retries:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+            res = response.json()
+            parts_out = res.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+            text = "".join(p.get("text", "") for p in parts_out).strip()
+            if not text:
+                logger.warning(f"Gemini Flash attempt {attempt+1}: empty response, retrying...")
+                if attempt < retries:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+            text = text.replace("```json", "").replace("```", "").strip()
+            data = _coerce_dict(json.loads(text))
+            if isinstance(data, dict):
+                ca = data.get("chart_analysis")
+                logger.info(f"Gemini Flash response chart_analysis: " + (json.dumps(ca) if ca else "MISSING"))
+            return data
+        except json.JSONDecodeError as e:
+            logger.warning(f"Gemini Flash attempt {attempt+1}: JSON error ({e}), retrying...")
+            if attempt < retries:
+                await asyncio.sleep(1)
+                continue
+            return None
+        except Exception as e:
+            logger.error(f"Gemini Flash attempt {attempt+1} failed: {e}")
+            if attempt < retries:
+                await asyncio.sleep(1)
+                continue
+            return None
+    return None
+
+
+# ─── AI: STEP 3.7 FLASH VIA KILO CODE GATEWAY ─────────────────────────
+
+KILO_API_KEY = os.getenv("KILO_API_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbnYiOiJwcm9kdWN0aW9uIiwia2lsb1VzZXJJZCI6ImQyYjRjOTIwLTYwYTAtNGQwZS04ZjliLWQ4MDAyNjI5MzIwMCIsImFwaVRva2VuUGVwcGVyIjpudWxsLCJ2ZXJzaW9uIjozLCJpYXQiOjE3ODY1MTk4MjEsImV4cCI6MTk0NDE5OTgyMX0.WhsCfQWhMCyJzeacsekuRTurBjqQr6iEUwx4ln-SK34")
+KILO_BASE_URL = os.getenv("KILO_BASE_URL", "https://api.kilo.ai/api/gateway")
+KILO_MODEL = os.getenv("KILO_MODEL", "stepfun/step-3.7-flash:free")
+# Step 3.7 Flash spends most output tokens on hidden reasoning; 2048 is NOT enough
+# (finish=length, empty content). It needs its own larger budget regardless of
+# the global AI_OUTPUT_MAX_TOKENS used by the faster text models.
+KILO_MAX_TOKENS = int(os.getenv("KILO_MAX_TOKENS", "8192"))
+kilo_client = OpenAI(base_url=KILO_BASE_URL, api_key=KILO_API_KEY, timeout=AI_MODEL_TIMEOUT_SECONDS)
+
+
+async def query_kilo_step_analysis(tech_data: dict, chart_b64: str | None = None, retries: int = 2) -> dict | None:
+    """Chart-capable analyst on Step 3.7 Flash via the Kilo Code gateway.
+
+    Same prompt, same chart attachment, same JSON schema as the Gemini Flash
+    and Muse Glimmer paths — kept pluggable so the two chart models can be
+    A/B tested for speed (CHART_MODEL=kilo|gemini).
+    """
+    data_json = json.dumps([tech_data], indent=2)
+    prompt = TRADING_PROMPT_TEMPLATE.format(data_json=data_json)
+    if chart_b64:
+        prompt = prompt.replace(
+            "### TIMEFRAME CONTEXT",
+            CHART_IMAGE_PROMPT_SECTION + "\n\n### TIMEFRAME CONTEXT"
+        )
+        user_content = [
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{chart_b64}"}},
+            {"type": "text", "text": prompt},
+        ]
+    else:
+        user_content = prompt
+
+    for attempt in range(retries + 1):
+        try:
+            completion = await asyncio.to_thread(
+                kilo_client.chat.completions.create,
+                model=KILO_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'."},
+                    {"role": "user", "content": user_content}
+                ],
+                temperature=0.2,
+                max_tokens=KILO_MAX_TOKENS,
+            )
+            text = completion.choices[0].message.content or ""
+            if not text:
+                logger.warning(f"Kilo Step attempt {attempt+1}: empty response, retrying...")
+                if attempt < retries:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+            text = text.replace("```json", "").replace("```", "").strip()
+            data = _coerce_dict(json.loads(text))
+            if isinstance(data, dict):
+                ca = data.get("chart_analysis")
+                logger.info(f"Kilo Step response chart_analysis: " + (json.dumps(ca) if ca else "MISSING"))
+            return data
+        except json.JSONDecodeError as e:
+            logger.warning(f"Kilo Step attempt {attempt+1}: JSON error ({e}), retrying...")
+            if attempt < retries:
+                await asyncio.sleep(1)
+                continue
+            return None
+        except Exception as e:
+            logger.error(f"Kilo Step attempt {attempt+1} failed: {e}")
+            if attempt < retries:
+                await asyncio.sleep(1)
+                continue
+            return None
+    return None
 
 
 # ─── AI: CLAUDE OPUS 5 ────────────────────────────────────────────────
@@ -1403,25 +1608,27 @@ async def query_claude_analysis(tech_data: dict, retries: int = 2) -> dict | Non
     return None
 
 
-# ─── AI: DEEPSEEK VIA ZEN ─────────────────────────────────────────────
+# ─── AI: LING 3.0 TINY VIA KILO CODE ──────────────────────────────────
 
-ZEN_KEY = os.getenv("OPENCODE_ZEN_KEY", "sk-5UVZdq3bAXTbOm55FiX8LqZIy4gKz2VFs5MVdU7QFfsqXQ8evXzVDU3Y0Tc5qY32")
-zen_client = OpenAI(base_url="https://opencode.ai/zen/v1", api_key=ZEN_KEY, timeout=120.0)
+KILO_LING_MODEL = "inclusionai/ling-3.0-tiny:free"
+KILO_LING_BASE_URL = os.getenv("KILO_LING_BASE_URL", "https://api.kilo.ai/api/gateway")
+KILO_LING_API_KEY = os.getenv("KILO_API_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbnYiOiJwcm9kdWN0aW9uIiwia2lsb1VzZXJJZCI6ImQyYjRjOTIwLTYwYTAtNGQwZS04ZjliLWQ4MDAyNjI5MzIwMCIsImFwaVRva2VuUGVwcGVyIjpudWxsLCJ2ZXJzaW9uIjozLCJpYXQiOjE3ODY1MTk4MjEsImV4cCI6MTk0NDE5OTgyMX0.WhsCfQWhMCyJzeacsekuRTurBjqQr6iEUwx4ln-SK34")
+kilo_ling_client = OpenAI(base_url=KILO_LING_BASE_URL, api_key=KILO_LING_API_KEY, timeout=AI_MODEL_TIMEOUT_SECONDS)
 
 
-async def query_deepseek_vote(tech_data: dict, retries: int = 2) -> dict | None:
+async def query_ling_vote(tech_data: dict, retries: int = 2) -> dict | None:
     data_json = json.dumps([tech_data], indent=2)
     prompt = TRADING_PROMPT_TEMPLATE.format(data_json=data_json)
     for attempt in range(retries + 1):
         try:
             completion = await asyncio.to_thread(
-                zen_client.chat.completions.create,
-                model="deepseek-v4-flash-free",
+                kilo_ling_client.chat.completions.create,
+                model=KILO_LING_MODEL,
                 messages=[
                     {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.2, max_tokens=8192
+                temperature=0.2, max_tokens=AI_OUTPUT_MAX_TOKENS
             )
             text = completion.choices[0].message.content.strip()
             text = text.replace("```json", "").replace("```", "").strip()
@@ -1432,13 +1639,13 @@ async def query_deepseek_vote(tech_data: dict, retries: int = 2) -> dict | None:
                 return None
             return _coerce_dict(json.loads(text))
         except json.JSONDecodeError as e:
-            logger.warning(f"DeepSeek vote attempt {attempt+1}: JSON error ({e}), retrying...")
+            logger.warning(f"Ling vote attempt {attempt+1}: JSON error ({e}), retrying...")
             if attempt < retries:
                 await asyncio.sleep(1)
                 continue
             return None
         except Exception as e:
-            logger.warning(f"DeepSeek vote attempt {attempt+1} failed: {e}")
+            logger.warning(f"Ling vote attempt {attempt+1} failed: {e}")
             if attempt < retries:
                 await asyncio.sleep(1)
                 continue
@@ -1446,38 +1653,77 @@ async def query_deepseek_vote(tech_data: dict, retries: int = 2) -> dict | None:
     return None
 
 
-async def query_deepseek_analysis_old(tech_data: dict, retries: int = 2) -> dict | None:
+# ─── AI: ISING CALIBRATION 1.5 31B VIA NVIDIA ──────────────────────────
+
+NVIDIA_NEMOTRON_API_KEY = os.getenv("NVIDIA_NEMOTRON_API_KEY", "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")
+nvidia_nemotron_client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=NVIDIA_NEMOTRON_API_KEY)
+NEMOTRON_MODEL = "nvidia/ising-calibration-1.5-31b"
+NEMOTRON_MAX_TOKENS = 1024
+
+
+async def query_nemotron_vote(tech_data: dict, retries: int = 1) -> dict | None:
     data_json = json.dumps([tech_data], indent=2)
     prompt = TRADING_PROMPT_TEMPLATE.format(data_json=data_json)
     for attempt in range(retries + 1):
         try:
             completion = await asyncio.to_thread(
-                zen_client.chat.completions.create,
-                model="deepseek-v4-flash-free",
+                nvidia_nemotron_client.chat.completions.create,
+                model=NEMOTRON_MODEL,
                 messages=[
-                    {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'."},
+                    {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'. No thinking, no preamble."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.2, max_tokens=8192
+                temperature=0.2, top_p=0.7, max_tokens=NEMOTRON_MAX_TOKENS
             )
             text = completion.choices[0].message.content.strip()
-            text = text.replace("```json", "").replace("```", "").strip()
-            if not text:
-                logger.warning(f"DeepSeek attempt {attempt+1}: empty response, retrying...")
+            data = _parse_model_output(text)
+            if data is None:
                 if attempt < retries:
                     await asyncio.sleep(1)
                     continue
                 return None
-            return _coerce_dict(json.loads(text))
-        except json.JSONDecodeError as e:
-            logger.warning(f"DeepSeek attempt {attempt+1}: JSON error ({e}), retrying...")
+            return data
+        except Exception as e:
+            logger.warning(f"Nemotron vote attempt {attempt+1} failed: {e}")
             if attempt < retries:
                 await asyncio.sleep(1)
                 continue
-            logger.error(f"DeepSeek failed after {retries+1} attempts: {e}")
             return None
+    return None
+
+
+# ─── AI: NVIDIA LLAMA 3.1 8B INSTRUCT (FAST MODEL) ──────────────────────
+
+NVIDIA_LLAMA_API_KEY = os.getenv("NVIDIA_LLAMA_API_KEY", "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")
+nvidia_llama_client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=NVIDIA_LLAMA_API_KEY)
+LLAMA_MODEL = "meta/llama-3.1-8b-instruct"
+LLAMA_MAX_TOKENS = 512
+
+
+async def query_llama_vote(tech_data: dict, retries: int = 1) -> dict | None:
+    data_json = json.dumps([tech_data], indent=2)
+    prompt = TRADING_PROMPT_TEMPLATE.format(data_json=data_json)
+    for attempt in range(retries + 1):
+        try:
+            completion = await asyncio.to_thread(
+                nvidia_llama_client.chat.completions.create,
+                model=LLAMA_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'. No thinking, no preamble."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2, top_p=0.7, max_tokens=LLAMA_MAX_TOKENS
+            )
+            text = completion.choices[0].message.content.strip()
+            data = _parse_model_output(text)
+            if data is None:
+                if attempt < retries:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+            return data
         except Exception as e:
-            logger.error(f"DeepSeek attempt {attempt+1} failed: {e}")
+            logger.warning(f"Llama vote attempt {attempt+1} failed: {e}")
             if attempt < retries:
                 await asyncio.sleep(1)
                 continue
@@ -1503,64 +1749,152 @@ def get_pair_category(pair_code: str) -> str:
     return "REAL"
 
 
+def data_timestamp_seconds(tech_data: dict) -> float | None:
+    """Epoch seconds of the newest closed candle in the analyzed data.
+
+    Used by the freshness guard to detect when the AI's inputs have gone stale.
+    """
+    candles = (tech_data or {}).get("candles") or []
+    for c in reversed(candles):
+        t = c.get("time")
+        if t:
+            return float(t)
+    return None
+
+
+def quick_direction_check(summary: dict) -> str:
+    """Fast deterministic BUY/SELL/NEUTRAL read on fresh data.
+
+    Used to re-validate an AI signal when the original data became stale —
+    running the full 3-model pipeline again would reintroduce the latency.
+    """
+    s = summary or {}
+    m1 = s.get("metrics_1m", {}) or {}
+    score = 0.0
+    if s.get("ema_alignment") == "BULLISH_ALIGNED":
+        score += 1.0
+    elif s.get("ema_alignment") == "BEARISH_ALIGNED":
+        score -= 1.0
+    macd_diff = m1.get("macd_diff") or 0
+    score += 1.0 if macd_diff > 0 else (-1.0 if macd_diff < 0 else 0.0)
+    rsi = m1.get("rsi", 50) or 50
+    if rsi < 30:
+        score += 0.5
+    elif rsi > 70:
+        score -= 0.5
+    cp = s.get("color_probabilities", {}).get("historical_probability", {}) or {}
+    green = cp.get("next_green_percentage", 50) or 50
+    red = cp.get("next_red_percentage", 50) or 50
+    if green > red + 5:
+        score += 0.5
+    elif red > green + 5:
+        score -= 0.5
+    if score >= 1.5:
+        return "BUY"
+    if score <= -1.5:
+        return "SELL"
+    return "NEUTRAL"
+
+
+def _process_vote_result(name, res, votes, confidences, reasons, model_details) -> bool:
+    """Fold one model's response into the vote tally. Returns True on a valid vote."""
+    if isinstance(res, Exception) or res is None:
+        logger.warning(f"{name} failed, skipping vote")
+        return False
+    if not isinstance(res, dict):
+        logger.warning(f"{name} returned non-dict result ({type(res).__name__}), skipping vote")
+        return False
+
+    direction = str(res.get("direction", "")).upper()
+    direction = "BUY" if direction in ("BUY", "UP") else ("SELL" if direction in ("SELL", "DOWN") else None)
+    if not direction:
+        logger.warning(f"{name} returned invalid direction: {res.get('direction')}")
+        return False
+
+    votes[direction] += 1
+    conf = int(res.get("confidence", 50))
+    confidences.append(conf)
+    reason = res.get("reason", "")
+    line = f"{name}: {direction} ({conf}%) - {reason}"
+    chart_analysis = res.get("chart_analysis") or {}
+    if isinstance(chart_analysis, dict):
+        ca = " | ".join(
+            f"{k}: {v}" for k, v in (
+                ("Visual chart", chart_analysis.get("visual_trend")),
+                ("Levels seen", chart_analysis.get("key_levels_seen")),
+                ("Pattern at price", chart_analysis.get("pattern_at_price")),
+                ("Telemetry agreement", chart_analysis.get("telemetry_agreement")),
+                ("Visual override", chart_analysis.get("visual_signal_override")),
+            ) if v
+        )
+        if ca:
+            line = f"{line}\n   👁️ CHART SEEN BY {name}: {ca}"
+    reasons.append(line)
+    model_details.append({"model": name, "direction": direction, "confidence": conf})
+    chart_trend = chart_analysis.get("visual_trend") if isinstance(chart_analysis, dict) else None
+    logger.info(f"{name} votes {direction} ({conf}%)" + (f" | chart: {chart_trend}" if chart_trend else ""))
+    return True
+
+
 async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: str = None, chart_b64: str | None = None) -> dict:
     summary = tech_data.get("summary", tech_data) if isinstance(tech_data, dict) else tech_data
 
-    logger.info(f"Voting system: Running 3 models for {pair_code}" + (" (with chart image for Muse Glimmer)" if chart_b64 else ""))
+    logger.info(f"Voting system: Running 3 models for {pair_code}" + (" (with chart image for Gemini Flash)" if chart_b64 else ""))
 
-    results = await asyncio.gather(
-        query_diffusion_gemma_analysis(summary, chart_b64=chart_b64),
-        query_deepseek_vote(summary),
-        query_gemini_analysis(summary),
-        return_exceptions=True
-    )
+    async def _guarded(name, coro):
+        try:
+            return name, await asyncio.wait_for(coro, timeout=AI_MODEL_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.warning(f"{name} timed out after {AI_MODEL_TIMEOUT_SECONDS:.0f}s")
+            return name, None
+        except Exception as e:
+            logger.warning(f"{name} failed: {e}")
+            return name, None
+
+    # Kick all 3 models off concurrently, but only wait for as long as we need.
+    # We stop as soon as 2 models agree (majority) or the deadline passes.
+    # Model lineup:
+    #   1. Gemini Flash (chart-capable, first model)
+    #   2. Ising Calibration 1.5 31B via NVIDIA (second model)
+    #   3. Llama 3.1 8B via NVIDIA (third model, low-token fast response)
+    if CHART_MODEL == "gemini":
+        chart_label = "Gemini Flash"
+        chart_coro = query_gemini_flash_analysis(summary, chart_b64=chart_b64)
+    else:
+        chart_label = "Step 3.7 Flash"
+        chart_coro = query_kilo_step_analysis(summary, chart_b64=chart_b64)
+    pending = {
+        chart_label: _guarded(chart_label, chart_coro),
+        "Ising Calibration 1.5": _guarded("Ising Calibration 1.5", query_nemotron_vote(summary)),
+        "Llama 3.1 8B": _guarded("Llama 3.1 8B", query_llama_vote(summary)),
+    }
+    pending_tasks = {asyncio.ensure_future(coro): name for name, coro in pending.items()}
 
     votes = {"BUY": 0, "SELL": 0}
     confidences = []
     reasons = []
-    model_names = ["Muse Glimmer 30B", "DeepSeek V4 Flash", "MiMo V2.5"]
     model_details = []
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + AI_VOTE_DEADLINE_SECONDS
 
-    for i, (name, res) in enumerate(zip(model_names, results)):
-        if isinstance(res, Exception) or res is None:
-            logger.warning(f"{name} failed, skipping vote")
-            continue
+    while pending_tasks:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            break
+        done, _ = await asyncio.wait(pending_tasks, timeout=remaining, return_when=asyncio.FIRST_COMPLETED)
+        for fut in done:
+            name, res = fut.result()
+            _process_vote_result(name, res, votes, confidences, reasons, model_details)
+            pending_tasks.pop(fut, None)
+        if votes["BUY"] >= 2 or votes["SELL"] >= 2:
+            logger.info(f"Majority reached after {loop.time() - (deadline - AI_VOTE_DEADLINE_SECONDS):.0f}s, cancelling remaining models")
+            break
 
-        if not isinstance(res, dict):
-            logger.warning(f"{name} returned non-dict result ({type(res).__name__}), skipping vote")
-            continue
+    for fut in pending_tasks:
+        fut.cancel()
 
-        direction = res.get("direction", "").upper()
-        direction = "BUY" if direction in ("BUY", "UP") else ("SELL" if direction in ("SELL", "DOWN") else None)
-
-        if direction:
-            votes[direction] += 1
-            conf = int(res.get("confidence", 50))
-            confidences.append(conf)
-            reason = res.get("reason", "")
-            line = f"{name}: {direction} ({conf}%) - {reason}"
-            chart_analysis = res.get("chart_analysis") or {}
-            if isinstance(chart_analysis, dict):
-                ca = " | ".join(
-                    f"{k}: {v}" for k, v in (
-                        ("Visual chart", chart_analysis.get("visual_trend")),
-                        ("Levels seen", chart_analysis.get("key_levels_seen")),
-                        ("Pattern at price", chart_analysis.get("pattern_at_price")),
-                        ("Telemetry agreement", chart_analysis.get("telemetry_agreement")),
-                        ("Visual override", chart_analysis.get("visual_signal_override")),
-                    ) if v
-                )
-                if ca:
-                    line = f"{line}\n   👁️ CHART SEEN BY {name}: {ca}"
-            reasons.append(line)
-            model_details.append({"model": name, "direction": direction, "confidence": conf})
-            chart_trend = chart_analysis.get("visual_trend") if isinstance(chart_analysis, dict) else None
-            logger.info(f"{name} votes {direction} ({conf}%)" + (f" | chart: {chart_trend}" if chart_trend else ""))
-        else:
-            logger.warning(f"{name} returned invalid direction: {res.get('direction')}")
-
-    if not votes["BUY"] and not votes["SELL"]:
-        return {"direction": "SKIP", "confidence": 0, "reason": "All models failed to produce a valid vote.", "note": "All models failed."}
+    logger.info(f"Vote fast-path done: BUY={votes['BUY']}, SELL={votes['SELL']} "
+                f"(models voted: {[d['model'] for d in model_details]})")
 
     if votes["BUY"] >= 2:
         final_direction = "BUY"
@@ -1636,6 +1970,16 @@ def format_telegram_signal(signal: dict) -> str:
         signal_emoji = "📉"
         signal_text = "SELL (DOWN)"
 
+    data_ts = signal.get("data_timestamp")
+    data_age_line = ""
+    if data_ts:
+        try:
+            captured = datetime.fromtimestamp(data_ts, tz=PKT)
+            age_secs = max(0, int(now_ts - data_ts))
+            data_age_line = f"\nData captured: {captured.strftime('%H:%M:%S')} PKT (fresh, {age_secs}s old)"
+        except Exception:
+            data_age_line = ""
+
     parts = [
         "\U0001f4ca NEXT CANDLE SIGNAL",
         f"Pair: {pair_label}",
@@ -1644,6 +1988,10 @@ def format_telegram_signal(signal: dict) -> str:
         f"Confidence: {confidence}%",
         f"Trade Time: {trade_time}",
         f"Martingale: {martingale_label}",
+    ]
+    if data_age_line:
+        parts.append(data_age_line)
+    parts += [
         "",
         f"\u23f1\ufe0f Current candle ends in: {countdown}",
         "",

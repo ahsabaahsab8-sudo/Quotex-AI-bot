@@ -247,7 +247,7 @@ async def timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     timeframe=tf,
                 )
                 if chart_b64:
-                    logger.info(f"Chart rendered for {pair} ({len(chart_b64)} b64 chars) -> attached to Diffusion Gemma")
+                    logger.info(f"Chart rendered for {pair} ({len(chart_b64)} b64 chars) -> attached to Gemini Flash")
                 else:
                     logger.warning(f"Chart render failed for {pair}; proceeding without image")
         except Exception as e:
@@ -280,6 +280,43 @@ async def timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE)
     reason = ai_result.get("reason", "No reason provided.")
     note = ai_result.get("note", "")
 
+    # Freshness guard: the AI analyzed data captured at `data_ts`. If that state has
+    # already expired (older than ~1.5 candles), re-fetch fresh candles and run a fast
+    # deterministic re-check so we never signal on stale market conditions.
+    data_ts = bot_main.data_timestamp_seconds(tech_data)
+    data_age = (time.time() - data_ts) if data_ts else 0.0
+    if data_age > max(tf * bot_main.DATA_AGE_MULTIPLIER, 10):
+        logger.info(f"Signal data for {pair} is {data_age:.0f}s old (tf={tf}s). Refreshing + re-checking...")
+        fresh = None
+        try:
+            client = await bot_main.get_quotex_connection()
+            fresh = await bot_main.fetch_and_process_indicators(
+                client, pair, tech_data["summary"].get("payout_percentage", 80), timeframe=tf
+            )
+            await close_quotex_connection()
+        except Exception as e:
+            logger.warning(f"Freshness refresh failed for {pair}: {e}")
+        if fresh == "LOW_VOLATILITY":
+            await query.edit_message_text(
+                f"⚠️ *{display}* now shows LOW VOLATILITY on {tf_label}. Refusing to signal on stale analysis.",
+                parse_mode="Markdown",
+            )
+            return
+        if fresh and isinstance(fresh, dict):
+            fresh_check = bot_main.quick_direction_check(fresh["summary"])
+            if fresh_check != "NEUTRAL" and fresh_check != buy_sell:
+                await query.edit_message_text(
+                    f"⏭️ No signal for *{display}* on {tf_label}\n\n"
+                    f"The analyzed data became stale ({data_age:.0f}s old) and the fresh market state now "
+                    f"contradicts the AI signal (AI: {buy_sell}, fresh state: {fresh_check}). Rerun for a new signal.",
+                    parse_mode="Markdown",
+                )
+                return
+            tech_data = fresh
+            logger.info(f"Fresh data confirms {buy_sell} (fresh check: {fresh_check}). Signal is up to date.")
+        elif fresh is None:
+            logger.warning(f"Fresh data unavailable for {pair}; using AI result from {data_age:.0f}s-old data")
+
     signal = {
         "token": pair,
         "direction": buy_sell,
@@ -290,6 +327,7 @@ async def timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "payout": tech_data["summary"].get("payout_percentage", 80),
         "timeframe_seconds": tf,
         "timeframe_label": tf_label,
+        "data_timestamp": bot_main.data_timestamp_seconds(tech_data),
     }
 
     signal_text = bot_main.format_telegram_signal(signal)
@@ -369,8 +407,8 @@ def main():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
 
-    # Startup sanity check: confirm Diffusion Gemma (not GLM) and the
-    # .env Quotex proxy are actually wired into the running bot.
+    # Startup sanity check: confirm chart model and .env Quotex proxy
+    # are actually wired into the running bot.
     try:
         qx_proxy = os.getenv("QUOTEX_PROXY") or os.getenv("CAMOUFOX_PROXY") or ""
         if qx_proxy:
@@ -378,8 +416,8 @@ def main():
             logger.info("Quotex connection will use proxy from .env: %s", host)
         else:
             logger.warning("No QUOTEX_PROXY / CAMOUFOX_PROXY set in .env — connecting to Quotex DIRECTLY (likely geo-blocked)")
-        logger.info("AI models active: Diffusion Gemma 26B (Google, via NVIDIA), DeepSeek V4 Flash, MiMo V2.5")
-        logger.info("Chart image is attached to Diffusion Gemma for visual confirmation")
+        logger.info("AI models active: Gemini Flash (chart), Ising Calibration 1.5 31B, Llama 3.1 8B (via NVIDIA)")
+        logger.info("Chart image is attached to Gemini Flash for visual confirmation")
     except Exception as e:
         logger.warning(f"Runtime config check failed: {e}")
 
