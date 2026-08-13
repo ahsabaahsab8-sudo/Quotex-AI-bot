@@ -31,16 +31,18 @@ logger = logging.getLogger(__name__)
 # ─── LATENCY / STALENESS KNOBS ─────────────────────────────────────────
 # Fast-vote: stop waiting for all models as soon as 2 agree in the same
 # direction (majority reached). Hard deadline: whatever votes we have by then
-# are used. These prevent a single slow 30B image model from making the
-# signal 4 minutes stale.
-AI_VOTE_DEADLINE_SECONDS = float(os.getenv("AI_VOTE_DEADLINE_SECONDS", "60"))
-AI_MODEL_TIMEOUT_SECONDS = float(os.getenv("AI_MODEL_TIMEOUT_SECONDS", "90"))
+# are used. All 3 models are vision-capable now (Gemini Flash + Llama 3.2 11B
+# Vision + Muse Glimmer 30B), so the deadline is tightened to keep the
+# signal returning in seconds.
+AI_VOTE_DEADLINE_SECONDS = float(os.getenv("AI_VOTE_DEADLINE_SECONDS", "30"))
+AI_MODEL_TIMEOUT_SECONDS = float(os.getenv("AI_MODEL_TIMEOUT_SECONDS", "60"))
 AI_OUTPUT_MAX_TOKENS = int(os.getenv("AI_OUTPUT_MAX_TOKENS", "2048"))
 # Data older than this many candle timeframes is considered stale before signaling.
 DATA_AGE_MULTIPLIER = float(os.getenv("DATA_AGE_MULTIPLIER", "1.5"))
 # Chart-capable model for the 3-model vote: "kilo" (Step 3.7 Flash) or "gemini" (Gemini Flash).
-# Benchmarked on the same chart + prompt: gemini=3.4s (chart filled), kilo-step=~38s flaky,
-# kilo-nemotron=66s (no chart). gemini is the fast, reliable default.
+# All three voters get the same chart image + prompt. Gemini Flash is the fast
+# default (~3.4s, chart filled); the other two are Llama 3.2 11B Vision and
+# Muse Glimmer 30B, both chart-capable on the same NVIDIA keys.
 CHART_MODEL = os.getenv("CHART_MODEL", "gemini")
 
 
@@ -1653,38 +1655,124 @@ async def query_ling_vote(tech_data: dict, retries: int = 2) -> dict | None:
     return None
 
 
-# ─── AI: ISING CALIBRATION 1.5 31B VIA NVIDIA ──────────────────────────
+# ─── AI: MUSE GLIMMER 30B (VISION) VIA NVIDIA ───────────────────────────
 
 NVIDIA_NEMOTRON_API_KEY = os.getenv("NVIDIA_NEMOTRON_API_KEY", "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")
 nvidia_nemotron_client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=NVIDIA_NEMOTRON_API_KEY)
-NEMOTRON_MODEL = "nvidia/ising-calibration-1.5-31b"
-NEMOTRON_MAX_TOKENS = 1024
+# Muse Glimmer 30B (NVIDIA) is chart-capable and fills chart_analysis reliably.
+# It is a hidden-reasoning model: with tiny caps (<~1536) it spends the whole
+# budget on reasoning and returns content=None. 2048 lets it emit the JSON while
+# still voting comfortably inside the signal deadline.
+NEMOTRON_MODEL = os.getenv("NEMOTRON_MODEL", "meta/muse-glimmer-30b")
+NEMOTRON_MAX_TOKENS = int(os.getenv("NEMOTRON_MAX_TOKENS", "2048"))
+
+CHART_ONLY_PROMPT_TEMPLATE = (
+    "Look carefully at the attached candlestick chart image."
+    ' Reply with ONLY a JSON object, no other text, exactly this shape:\n'
+    '{"visual_trend":"UP","key_levels_seen":"list the visible levels/round numbers","pattern_at_price":"candle pattern at the last price",'
+    '"telemetry_agreement":"CONFIRMS or CONTRADICTS","visual_signal_override":"BUY or SELL"}\n'
+    "visual_trend is UP/DOWN/SIDEWAYS. Fill every field from what you SEE in the image, not from any other data."
+)
 
 
-async def query_nemotron_vote(tech_data: dict, retries: int = 1) -> dict | None:
+async def _repair_chart_analysis(client, model: str, chart_b64: str, max_tokens: int = 2048, timeout: float = 60.0) -> dict | None:
+    """Ask a model a focused vision-only question to get the chart_analysis block.
+
+    On NVIDIA, Muse Glimmer / Llama Vision often skip 'chart_analysis' when
+    the image is buried at the front of a long trading prompt. A second, tiny
+    image-only call reliably forces them to actually read the chart.
+    """
+    try:
+        completion = await asyncio.wait_for(asyncio.to_thread(
+            client.chat.completions.create,
+            model=model,
+            messages=[
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{chart_b64}"}},
+                    {"type": "text", "text": CHART_ONLY_PROMPT_TEMPLATE},
+                ]},
+            ],
+            temperature=0.2, top_p=0.7, max_tokens=max_tokens,
+        ), timeout=timeout)
+        msg = completion.choices[0].message
+        content = (msg.content or "").strip()
+        if not content:
+            content = ((getattr(msg, "reasoning_content", None) or "") or "").strip()
+        text = content
+        parsed = _parse_model_output(text)
+        if isinstance(parsed, dict) and parsed.get("visual_trend"):
+            return parsed
+        logger.warning(f"chart-only repair for {model}: unparsable response: {text[:200]!r}")
+        return None
+    except asyncio.TimeoutError:
+        logger.warning(f"chart-only repair for {model}: timed out after {timeout:.0f}s")
+        return None
+    except Exception as e:
+        logger.warning(f"chart-only repair for {model} failed: {e}")
+        return None
+
+
+async def query_nemotron_vote(tech_data: dict, chart_b64: str | None = None, retries: int = 1) -> dict | None:
     data_json = json.dumps([tech_data], indent=2)
     prompt = TRADING_PROMPT_TEMPLATE.format(data_json=data_json)
+    if chart_b64:
+        prompt = prompt.replace(
+            "### TIMEFRAME CONTEXT",
+            CHART_IMAGE_PROMPT_SECTION + "\n\n### TIMEFRAME CONTEXT"
+        )
+        user_content = [
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{chart_b64}"}},
+            {"type": "text", "text": prompt},
+        ]
+        schema = DIFFUSION_GEMMA_RESPONSE_SCHEMA_WITH_CHART
+    else:
+        user_content = prompt
+        schema = DIFFUSION_GEMMA_RESPONSE_SCHEMA
     for attempt in range(retries + 1):
         try:
-            completion = await asyncio.to_thread(
+            completion_task = asyncio.to_thread(
                 nvidia_nemotron_client.chat.completions.create,
                 model=NEMOTRON_MODEL,
                 messages=[
-                    {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'. No thinking, no preamble."},
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY the JSON object. No thinking, no preamble, no markdown fences. Start with '{' and end with '}'."},
+                    {"role": "user", "content": user_content}
                 ],
-                temperature=0.2, top_p=0.7, max_tokens=NEMOTRON_MAX_TOKENS
+                temperature=0.2, top_p=0.7, max_tokens=NEMOTRON_MAX_TOKENS,
+                response_format={"type": "json_schema", "json_schema": {"name": "trading_analysis", "strict": True, "schema": schema}},
             )
-            text = completion.choices[0].message.content.strip()
+            repair_task = asyncio.create_task(
+                _repair_chart_analysis(nvidia_nemotron_client, NEMOTRON_MODEL, chart_b64)
+            ) if chart_b64 else None
+            if repair_task:
+                logger.info("Muse Glimmer: chart-only repair running concurrently with main analysis")
+            completion = await completion_task
+            msg = completion.choices[0].message
+            content = (msg.content or "").strip()
+            if not content:
+                reasoning = getattr(msg, "reasoning_content", None) or ""
+                content = reasoning.strip()
+            text = content
             data = _parse_model_output(text)
             if data is None:
                 if attempt < retries:
                     await asyncio.sleep(1)
                     continue
                 return None
+            if isinstance(data, dict):
+                ca = data.get("chart_analysis")
+                if ca and isinstance(ca, dict):
+                    logger.info(f"Muse Glimmer chart_analysis: " + (json.dumps(ca) if ca else "MISSING"))
+                elif repair_task:
+                    logger.warning("Muse Glimmer skipped chart_analysis, using concurrent chart-only repair...")
+                    repair = await repair_task
+                    if repair:
+                        data["chart_analysis"] = repair
+                        logger.info(f"Muse Glimmer chart_analysis (repair): " + json.dumps(repair))
+                    else:
+                        logger.warning("Muse Glimmer chart-only repair failed")
             return data
         except Exception as e:
-            logger.warning(f"Nemotron vote attempt {attempt+1} failed: {e}")
+            logger.warning(f"Muse Glimmer vote attempt {attempt+1} failed: {e}")
             if attempt < retries:
                 await asyncio.sleep(1)
                 continue
@@ -1692,27 +1780,43 @@ async def query_nemotron_vote(tech_data: dict, retries: int = 1) -> dict | None:
     return None
 
 
-# ─── AI: NVIDIA LLAMA 3.1 8B INSTRUCT (FAST MODEL) ──────────────────────
+# ─── AI: NVIDIA LLAMA 3.2 11B VISION INSTRUCT (FAST VISION MODEL) ──────
 
 NVIDIA_LLAMA_API_KEY = os.getenv("NVIDIA_LLAMA_API_KEY", "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")
 nvidia_llama_client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=NVIDIA_LLAMA_API_KEY)
-LLAMA_MODEL = "meta/llama-3.1-8b-instruct"
-LLAMA_MAX_TOKENS = 512
+LLAMA_MODEL = "meta/llama-3.2-11b-vision-instruct"
+# Llama Vision truncates badly at tiny caps (finish=length) and then drops
+# chart_analysis. Give it enough budget to emit the full JSON object.
+LLAMA_MAX_TOKENS = int(os.getenv("LLAMA_MAX_TOKENS", "1024"))
 
 
-async def query_llama_vote(tech_data: dict, retries: int = 1) -> dict | None:
+async def query_llama_vote(tech_data: dict, chart_b64: str | None = None, retries: int = 1) -> dict | None:
     data_json = json.dumps([tech_data], indent=2)
     prompt = TRADING_PROMPT_TEMPLATE.format(data_json=data_json)
+    if chart_b64:
+        prompt = prompt.replace(
+            "### TIMEFRAME CONTEXT",
+            CHART_IMAGE_PROMPT_SECTION + "\n\n### TIMEFRAME CONTEXT"
+        )
+        user_content = [
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{chart_b64}"}},
+            {"type": "text", "text": prompt},
+        ]
+        schema = DIFFUSION_GEMMA_RESPONSE_SCHEMA_WITH_CHART
+    else:
+        user_content = prompt
+        schema = DIFFUSION_GEMMA_RESPONSE_SCHEMA
     for attempt in range(retries + 1):
         try:
             completion = await asyncio.to_thread(
                 nvidia_llama_client.chat.completions.create,
                 model=LLAMA_MODEL,
                 messages=[
-                    {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'. No thinking, no preamble."},
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY the JSON object. No thinking, no preamble, no markdown fences. Start with '{' and end with '}'."},
+                    {"role": "user", "content": user_content}
                 ],
-                temperature=0.2, top_p=0.7, max_tokens=LLAMA_MAX_TOKENS
+                temperature=0.2, top_p=0.7, max_tokens=LLAMA_MAX_TOKENS,
+                response_format={"type": "json_schema", "json_schema": {"name": "trading_analysis", "strict": True, "schema": schema}},
             )
             text = completion.choices[0].message.content.strip()
             data = _parse_model_output(text)
@@ -1721,9 +1825,21 @@ async def query_llama_vote(tech_data: dict, retries: int = 1) -> dict | None:
                     await asyncio.sleep(1)
                     continue
                 return None
+            if isinstance(data, dict):
+                ca = data.get("chart_analysis")
+                if ca and isinstance(ca, dict):
+                    logger.info(f"Llama Vision response chart_analysis: " + (json.dumps(ca) if ca else "MISSING"))
+                else:
+                    logger.warning(f"Llama Vision skipped chart_analysis, running chart-only repair...")
+                    repair = await _repair_chart_analysis(nvidia_llama_client, LLAMA_MODEL, chart_b64) if chart_b64 else None
+                    if repair:
+                        data["chart_analysis"] = repair
+                        logger.info(f"Llama Vision chart_analysis (repair): " + json.dumps(repair))
+                    else:
+                        logger.warning("Llama Vision chart-only repair failed")
             return data
         except Exception as e:
-            logger.warning(f"Llama vote attempt {attempt+1} failed: {e}")
+            logger.warning(f"Llama Vision vote attempt {attempt+1} failed: {e}")
             if attempt < retries:
                 await asyncio.sleep(1)
                 continue
@@ -1839,7 +1955,7 @@ def _process_vote_result(name, res, votes, confidences, reasons, model_details) 
 async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: str = None, chart_b64: str | None = None) -> dict:
     summary = tech_data.get("summary", tech_data) if isinstance(tech_data, dict) else tech_data
 
-    logger.info(f"Voting system: Running 3 models for {pair_code}" + (" (with chart image for Gemini Flash)" if chart_b64 else ""))
+    logger.info(f"Voting system: Running 3 vision models for {pair_code}" + (" (all 3 analyze the chart image)" if chart_b64 else ""))
 
     async def _guarded(name, coro):
         try:
@@ -1853,10 +1969,10 @@ async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: 
 
     # Kick all 3 models off concurrently, but only wait for as long as we need.
     # We stop as soon as 2 models agree (majority) or the deadline passes.
-    # Model lineup:
+    # Model lineup (all three are vision-capable and get the same chart image):
     #   1. Gemini Flash (chart-capable, first model)
-    #   2. Ising Calibration 1.5 31B via NVIDIA (second model)
-    #   3. Llama 3.1 8B via NVIDIA (third model, low-token fast response)
+    #   2. Muse Glimmer 30B via NVIDIA (second model)
+    #   3. Llama 3.2 11B Vision via NVIDIA (third model, low-token fast response)
     if CHART_MODEL == "gemini":
         chart_label = "Gemini Flash"
         chart_coro = query_gemini_flash_analysis(summary, chart_b64=chart_b64)
@@ -1865,8 +1981,8 @@ async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: 
         chart_coro = query_kilo_step_analysis(summary, chart_b64=chart_b64)
     pending = {
         chart_label: _guarded(chart_label, chart_coro),
-        "Ising Calibration 1.5": _guarded("Ising Calibration 1.5", query_nemotron_vote(summary)),
-        "Llama 3.1 8B": _guarded("Llama 3.1 8B", query_llama_vote(summary)),
+        "Muse Glimmer 30B": _guarded("Muse Glimmer 30B", query_nemotron_vote(summary, chart_b64=chart_b64)),
+        "Llama 3.2 11B Vision": _guarded("Llama 3.2 11B Vision", query_llama_vote(summary, chart_b64=chart_b64)),
     }
     pending_tasks = {asyncio.ensure_future(coro): name for name, coro in pending.items()}
 
