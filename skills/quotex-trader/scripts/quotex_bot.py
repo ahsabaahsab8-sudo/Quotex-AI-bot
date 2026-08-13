@@ -416,7 +416,7 @@ def main():
             logger.info("Quotex connection will use proxy from .env: %s", host)
         else:
             logger.warning("No QUOTEX_PROXY / CAMOUFOX_PROXY set in .env — connecting to Quotex DIRECTLY (likely geo-blocked)")
-        logger.info("AI models active: Gemini Flash (chart), Ising Calibration 1.5 31B, Llama 3.1 8B (via NVIDIA)")
+        logger.info("AI models active: Gemini Flash (chart), Muse Glimmer 30B, Llama 3.2 11B Vision (via NVIDIA)")
         logger.info("Chart image is attached to Gemini Flash for visual confirmation")
     except Exception as e:
         logger.warning(f"Runtime config check failed: {e}")
