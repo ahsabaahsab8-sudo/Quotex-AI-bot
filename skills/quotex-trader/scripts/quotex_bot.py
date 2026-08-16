@@ -77,16 +77,43 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 
+async def model_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    keyboard = [
+        [InlineKeyboardButton("👁️ Vision AI Models", callback_data="model_vision")],
+        [InlineKeyboardButton("🤖 LLM Models", callback_data="model_llm")],
+        [InlineKeyboardButton("🔙 Back", callback_data="back_start")]
+    ]
+    
+    await query.edit_message_text(
+        "Choose AI Model Type for Analysis:\n\n"
+        "👁️ **Vision AI Models** - Chart-based analysis (Gemini Flash, Muse Glimmer 30B, Llama 3.2 11B Vision)\n"
+        "🤖 **LLM Models** - Text-based analysis (Nemotron 3 Ultra, Llama 3.1 8B, Laguna-S 2.1)",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
+    )
+
+
 async def get_signal_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    keyboard = [[InlineKeyboardButton(f"{CATEGORY_EMOJI[c]} {CATEGORY_LABEL[c]}", callback_data=f"cat_{c}")] for c in CATEGORY_LABEL]
-    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_start")])
+    if query.data == "model_vision":
+        context.user_data["model_type"] = "vision"
+    elif query.data == "model_llm":
+        context.user_data["model_type"] = "llm"
     
+    model_type = context.user_data.get("model_type", "vision")
+    
+    keyboard = [[InlineKeyboardButton(f"{CATEGORY_EMOJI[c]} {CATEGORY_LABEL[c]}", callback_data=f"cat_{c}")] for c in CATEGORY_LABEL]
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="model_selection")])
+    
+    model_label = "Vision AI Models" if model_type == "vision" else "LLM Models"
     await query.edit_message_text(
-        "Choose a category to select a pair for AI analysis:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        f"Model: {model_label}\n\nChoose a category to select a pair for AI analysis:",
+        reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown"
     )
 
 
@@ -94,6 +121,7 @@ async def menu_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     cat = query.data.replace("cat_", "")
+    model_type = context.user_data.get("model_type", "vision")
     await query.edit_message_text(f"⏳ Connecting to Quotex to fetch {CATEGORY_LABEL.get(cat, cat)}...", parse_mode="Markdown")
 
     try:
@@ -112,7 +140,7 @@ async def menu_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard, row = [], []
     for payout, code in pairs:
         label = format_pair_button_label(code, payout)
-        row.append(InlineKeyboardButton(label, callback_data=f"pair_{code}"))
+        row.append(InlineKeyboardButton(label, callback_data=f"pair_{model_type}_{cat}_{code}"))
         if len(row) == 2:
             keyboard.append(row)
             row = []
@@ -126,26 +154,32 @@ async def menu_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def back_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await start(query, context)
+    await start(update, context)
 
 
 async def pair_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    pair = query.data.replace("pair_", "")
+    # callback_data format: pair_{model_type}_{cat}_{code}
+    parts = query.data.split("_", 3)
+    model_type = parts[1]
+    cat = parts[2]
+    pair = parts[3]
+    
+    context.user_data["model_type"] = model_type
     display = format_pair_name(pair)
 
     tfs = ALL_QUOTEX_TIMEFRAMES
 
     keyboard, row = [], []
     for tf in tfs:
-        row.append(InlineKeyboardButton(f"{format_timeframe_label(tf)}", callback_data=f"tf_{pair}_{tf}"))
+        row.append(InlineKeyboardButton(f"{format_timeframe_label(tf)}", callback_data=f"tf_{model_type}_{cat}_{pair}_{tf}"))
         if len(row) == 2:
             keyboard.append(row)
             row = []
     if row:
         keyboard.append(row)
-    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="get_signal")])
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data=f"cat_{cat}")])
 
     await query.edit_message_text(
         f"📊 *{display}*\n\nSelect a timeframe for AI analysis:\n\n"
@@ -159,17 +193,28 @@ async def pair_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    # callback_data format: tf_{model_type}_{cat}_{pair}_{tf}
     rest = query.data[3:] if query.data.startswith("tf_") else query.data
-    sep = rest.rfind("_")
-    if sep <= 0:
+    parts = rest.rsplit("_", 1)
+    if len(parts) != 2:
         await query.edit_message_text("❌ Invalid timeframe selection. Please start again.")
         return
-    pair = rest[:sep]
+    prefix = parts[0]
     try:
-        tf = int(rest[sep + 1:])
+        tf = int(parts[1])
     except (ValueError, TypeError):
         await query.edit_message_text("❌ Invalid timeframe selection. Please start again.")
         return
+    # prefix = model_type_cat_pair
+    prefix_parts = prefix.split("_", 2)
+    if len(prefix_parts) != 3:
+        await query.edit_message_text("❌ Invalid timeframe selection. Please start again.")
+        return
+    model_type = prefix_parts[0]
+    cat = prefix_parts[1]
+    pair = prefix_parts[2]
+    
+    context.user_data["model_type"] = model_type
     original_pair = pair
     display = format_pair_name(pair)
     tf_label = format_timeframe_label(tf)
@@ -215,24 +260,24 @@ async def timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE)
             logger.info(f"Auto-switched {original_pair} -> {pair} (score {best['math_score']}/10)")
             await query.edit_message_text(
                 f"🔄 Switched *{format_pair_name(original_pair)}* ({math_score}/10) → *{display}* ({best['math_score']}/10)\n\n"
-                f"Step 4/5: Running 3-stage AI pipeline...",
+                f"Step 4/5: Running 3-stage AI pipeline ({'Vision' if model_type == 'vision' else 'LLM'})...",
                 parse_mode="Markdown"
             )
         else:
             await query.edit_message_text(
                 f"⏳ *{display}* scores {math_score}/10 but no better pair found.\n\n"
-                f"Step 4/5: Running 3-stage AI pipeline...",
+                f"Step 4/5: Running 3-stage AI pipeline ({'Vision' if model_type == 'vision' else 'LLM'})...",
                 parse_mode="Markdown"
             )
     else:
         await query.edit_message_text(
             f"⏳ *{display}* scores {math_score}/10 (good setup) on {tf_label}.\n\n"
-            f"Step 3/5: Running 3-stage AI pipeline...",
+            f"Step 3/5: Running 3-stage AI pipeline ({'Vision' if model_type == 'vision' else 'LLM'})...",
             parse_mode="Markdown"
         )
 
     chart_b64 = None
-    if os.getenv("ENABLE_CHART_CAPTURE", "1") == "1":
+    if os.getenv("ENABLE_CHART_CAPTURE", "1") == "1" and model_type == "vision":
         try:
             import chart_render
             candles = (tech_data or {}).get("candles")
@@ -253,12 +298,19 @@ async def timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception as e:
             logger.warning(f"Chart render error for {pair}: {e}")
 
-    ai_result = await bot_main.query_all_models(
-        tech_data["summary"],
-        pair_code=pair,
-        original_pair=original_pair if pair != original_pair else None,
-        chart_b64=chart_b64,
-    )
+    if model_type == "llm":
+        ai_result = await bot_main.query_all_llm_models(
+            tech_data["summary"],
+            pair_code=pair,
+            original_pair=original_pair if pair != original_pair else None,
+        )
+    else:
+        ai_result = await bot_main.query_all_models(
+            tech_data["summary"],
+            pair_code=pair,
+            original_pair=original_pair if pair != original_pair else None,
+            chart_b64=chart_b64,
+        )
     await close_quotex_connection()
 
     if not ai_result or not isinstance(ai_result, dict):
@@ -417,6 +469,7 @@ def main():
         else:
             logger.warning("No QUOTEX_PROXY / CAMOUFOX_PROXY set in .env — connecting to Quotex DIRECTLY (likely geo-blocked)")
         logger.info("AI models active: Gemini Flash (chart), Muse Glimmer 30B, Llama 3.2 11B Vision (via NVIDIA)")
+        logger.info("LLM models active: Nemotron 3 Ultra (Zen), Llama 3.1 8B (NVIDIA), Laguna-S 2.1 (Kilo)")
         logger.info("Chart image is attached to Gemini Flash for visual confirmation")
     except Exception as e:
         logger.warning(f"Runtime config check failed: {e}")
@@ -425,7 +478,10 @@ def main():
     request = HTTPXRequest(httpx_kwargs={"timeout": 30})
     app = Application.builder().token(TOKEN).request(request).concurrent_updates(True).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(get_signal_menu, pattern="^get_signal$"))
+    app.add_handler(CallbackQueryHandler(model_selection, pattern="^get_signal$"))
+    app.add_handler(CallbackQueryHandler(model_selection, pattern="^model_selection$"))
+    app.add_handler(CallbackQueryHandler(get_signal_menu, pattern="^model_vision$"))
+    app.add_handler(CallbackQueryHandler(get_signal_menu, pattern="^model_llm$"))
     app.add_handler(CallbackQueryHandler(menu_category, pattern="^cat_"))
     app.add_handler(CallbackQueryHandler(pair_selected, pattern="^pair_"))
     app.add_handler(CallbackQueryHandler(timeframe_selected, pattern="^tf_"))

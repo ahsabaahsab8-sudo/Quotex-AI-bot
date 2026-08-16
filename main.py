@@ -37,6 +37,11 @@ logger = logging.getLogger(__name__)
 AI_VOTE_DEADLINE_SECONDS = float(os.getenv("AI_VOTE_DEADLINE_SECONDS", "30"))
 AI_MODEL_TIMEOUT_SECONDS = float(os.getenv("AI_MODEL_TIMEOUT_SECONDS", "60"))
 AI_OUTPUT_MAX_TOKENS = int(os.getenv("AI_OUTPUT_MAX_TOKENS", "2048"))
+# LLM text models (Nemotron 3 Ultra, Llama 3.1 8B, Laguna-S 2.1) are slower than
+# the vision models (they emit chain-of-thought before the JSON), so the LLM vote
+# gets a longer fast-path deadline to let all 3 cast a vote.
+LLM_VOTE_DEADLINE_SECONDS = float(os.getenv("LLM_VOTE_DEADLINE_SECONDS", "45"))
+LLM_MODEL_TIMEOUT_SECONDS = float(os.getenv("LLM_MODEL_TIMEOUT_SECONDS", "75"))
 # Data older than this many candle timeframes is considered stale before signaling.
 DATA_AGE_MULTIPLIER = float(os.getenv("DATA_AGE_MULTIPLIER", "1.5"))
 # Chart-capable model for the 3-model vote: "kilo" (Step 3.7 Flash) or "gemini" (Gemini Flash).
@@ -1847,6 +1852,159 @@ async def query_llama_vote(tech_data: dict, chart_b64: str | None = None, retrie
     return None
 
 
+# ─── AI: LLM MODELS (Text-based, no chart) ────────────────────────────
+
+LLM_NEMOTRON_ULTRA_KEY = os.getenv("OPENCODE_ZEN_KEY", "sk-5UVZdq3bAXTbOm55FiX8LqZIy4gKz2VFs5MVdU7QFfsqXQ8evXzVDU3Y0Tc5qY32")
+llm_nemotron_ultra_client = OpenAI(base_url="https://opencode.ai/zen/v1", api_key=LLM_NEMOTRON_ULTRA_KEY, timeout=AI_MODEL_TIMEOUT_SECONDS)
+LLM_NEMOTRON_ULTRA_MODEL = "nemotron-3-ultra-free"
+# Nemotron 3 Ultra is reasoning-heavy: it spends output tokens on chain-of-thought
+# BEFORE the JSON. A tiny cap truncates it (finish=length, empty JSON). It needs
+# ~3072 to reliably emit the full signal within the 30-40s window.
+LLM_NEMOTRON_MAX_TOKENS = int(os.getenv("LLM_NEMOTRON_MAX_TOKENS", "3072"))
+# Baseline budget for the fast text LLMs (default 1024 keeps them quick).
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "1024"))
+
+NVIDIA_LLM_API_KEY = os.getenv("NVIDIA_NEMOTRON_API_KEY", "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")
+nvidia_llm_client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=NVIDIA_LLM_API_KEY)
+LLM_NVIDIA_MODEL = "meta/llama-3.1-8b-instruct"
+
+KILO_LLM_MODEL = "poolside/laguna-s-2.1:free"
+KILO_LLM_BASE_URL = os.getenv("KILO_LLM_BASE_URL", "https://api.kilo.ai/api/gateway")
+KILO_LLM_API_KEY = os.getenv("KILO_API_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbnYiOiJwcm9kdWN0aW9uIiwia2lsb1VzZXJJZCI6ImQyYjRjOTIwLTYwYTAtNGQwZS04ZjliLWQ4MDAyNjI5MzIwMCIsImFwaVRva2VuUGVwcGVyIjpudWxsLCJ2ZXJzaW9uIjozLCJpYXQiOjE3ODY1MTk4MjEsImV4cCI6MTk0NDE5OTgyMX0.WhsCfQWhMCyJzeacsekuRTurBjqQr6iEUwx4ln-SK34")
+kilo_llm_client = OpenAI(base_url=KILO_LLM_BASE_URL, api_key=KILO_LLM_API_KEY, timeout=AI_MODEL_TIMEOUT_SECONDS)
+# Laguna-S 2.1 also spends some tokens on reasoning; 2048 lets it emit the JSON.
+LLM_LAGUNA_MAX_TOKENS = int(os.getenv("LLM_LAGUNA_MAX_TOKENS", "2048"))
+
+
+async def query_llm_nemotron_ultra(tech_data: dict, retries: int = 2) -> dict | None:
+    data_json = json.dumps([tech_data], indent=2)
+    prompt = TRADING_PROMPT_TEMPLATE.format(data_json=data_json)
+    for attempt in range(retries + 1):
+        try:
+            completion = await asyncio.to_thread(
+                llm_nemotron_ultra_client.chat.completions.create,
+                model=LLM_NEMOTRON_ULTRA_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2, max_tokens=LLM_NEMOTRON_MAX_TOKENS
+            )
+            text = completion.choices[0].message.content.strip()
+            text = text.replace("```json", "").replace("```", "").strip()
+            if not text:
+                if attempt < retries:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+            data = _parse_model_output(text)
+            if data is None:
+                if attempt < retries:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+            return data
+        except json.JSONDecodeError as e:
+            logger.warning(f"Nemotron Ultra attempt {attempt+1}: JSON error ({e}), retrying...")
+            if attempt < retries:
+                await asyncio.sleep(1)
+                continue
+            return None
+        except Exception as e:
+            logger.warning(f"Nemotron Ultra attempt {attempt+1} failed: {e}")
+            if attempt < retries:
+                await asyncio.sleep(1)
+                continue
+            return None
+    return None
+
+
+async def query_llm_nvidia_nemotron(tech_data: dict, retries: int = 2) -> dict | None:
+    data_json = json.dumps([tech_data], indent=2)
+    prompt = TRADING_PROMPT_TEMPLATE.format(data_json=data_json)
+    for attempt in range(retries + 1):
+        try:
+            completion = await asyncio.to_thread(
+                nvidia_llm_client.chat.completions.create,
+                model=LLM_NVIDIA_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2, top_p=0.7, max_tokens=LLM_MAX_TOKENS
+            )
+            text = completion.choices[0].message.content.strip()
+            text = text.replace("```json", "").replace("```", "").strip()
+            if not text:
+                if attempt < retries:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+            data = _parse_model_output(text)
+            if data is None:
+                if attempt < retries:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+            return data
+        except json.JSONDecodeError as e:
+            logger.warning(f"NVIDIA Nemotron Super attempt {attempt+1}: JSON error ({e}), retrying...")
+            if attempt < retries:
+                await asyncio.sleep(1)
+                continue
+            return None
+        except Exception as e:
+            logger.warning(f"NVIDIA Nemotron Super attempt {attempt+1} failed: {e}")
+            if attempt < retries:
+                await asyncio.sleep(1)
+                continue
+            return None
+    return None
+
+
+async def query_llm_kilo_ling(tech_data: dict, retries: int = 2) -> dict | None:
+    data_json = json.dumps([tech_data], indent=2)
+    prompt = TRADING_PROMPT_TEMPLATE.format(data_json=data_json)
+    for attempt in range(retries + 1):
+        try:
+            completion = await asyncio.to_thread(
+                kilo_llm_client.chat.completions.create,
+                model=KILO_LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2, max_tokens=LLM_LAGUNA_MAX_TOKENS
+            )
+            text = completion.choices[0].message.content.strip()
+            text = text.replace("```json", "").replace("```", "").strip()
+            if not text:
+                if attempt < retries:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+            data = _parse_model_output(text)
+            if data is None:
+                if attempt < retries:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+            return data
+        except json.JSONDecodeError as e:
+            logger.warning(f"Kilo LLM Ling attempt {attempt+1}: JSON error ({e}), retrying...")
+            if attempt < retries:
+                await asyncio.sleep(1)
+                continue
+            return None
+        except Exception as e:
+            logger.warning(f"Kilo LLM Ling attempt {attempt+1} failed: {e}")
+            if attempt < retries:
+                await asyncio.sleep(1)
+                continue
+            return None
+    return None
+
+
 # ─── AI: VOTE ─────────────────────────────────────────────────────────
 
 CRYPTO_COMMODITY_PAIRS = {
@@ -2026,6 +2184,82 @@ async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: 
 
     final_reason = "\n".join(reasons) if reasons else "No model provided reasoning."
     logger.info(f"Vote result: BUY={votes['BUY']}, SELL={votes['SELL']} -> {final_direction} ({final_confidence}%)")
+
+    note = ""
+    if original_pair and original_pair != pair_code:
+        note = f"Note: Your pair ({original_pair}) had low setup. Auto-selected {pair_code} instead."
+
+    return {
+        "direction": final_direction,
+        "confidence": final_confidence,
+        "reason": final_reason,
+        "martingale_recommendation": "M1" if final_confidence >= 75 else "M0",
+        "note": note,
+    }
+
+
+async def query_all_llm_models(tech_data: dict, pair_code: str = "", original_pair: str = None) -> dict:
+    summary = tech_data.get("summary", tech_data) if isinstance(tech_data, dict) else tech_data
+
+    logger.info(f"LLM Voting system: Running 3 LLM models for {pair_code}")
+
+    async def _guarded(name, coro):
+        try:
+            return name, await asyncio.wait_for(coro, timeout=LLM_MODEL_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.warning(f"{name} timed out after {LLM_MODEL_TIMEOUT_SECONDS:.0f}s")
+            return name, None
+        except Exception as e:
+            logger.warning(f"{name} failed: {e}")
+            return name, None
+
+    pending = {
+        "Nemotron 3 Ultra": _guarded("Nemotron 3 Ultra", query_llm_nemotron_ultra(summary)),
+        "Llama 3.1 8B": _guarded("Llama 3.1 8B", query_llm_nvidia_nemotron(summary)),
+        "Laguna-S 2.1": _guarded("Laguna-S 2.1", query_llm_kilo_ling(summary)),
+    }
+    pending_tasks = {asyncio.ensure_future(coro): name for name, coro in pending.items()}
+
+    votes = {"BUY": 0, "SELL": 0}
+    confidences = []
+    reasons = []
+    model_details = []
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + LLM_VOTE_DEADLINE_SECONDS
+
+    while pending_tasks:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            break
+        done, _ = await asyncio.wait(pending_tasks, timeout=remaining, return_when=asyncio.FIRST_COMPLETED)
+        for fut in done:
+            name, res = fut.result()
+            _process_vote_result(name, res, votes, confidences, reasons, model_details)
+            pending_tasks.pop(fut, None)
+        if votes["BUY"] >= 2 or votes["SELL"] >= 2:
+            logger.info(f"LLM Majority reached after {loop.time() - (deadline - LLM_VOTE_DEADLINE_SECONDS):.0f}s, cancelling remaining models")
+            break
+
+    for fut in pending_tasks:
+        fut.cancel()
+
+    logger.info(f"LLM Vote fast-path done: BUY={votes['BUY']}, SELL={votes['SELL']} "
+                f"(models voted: {[d['model'] for d in model_details]})")
+
+    if votes["BUY"] >= 2:
+        final_direction = "BUY"
+    elif votes["SELL"] >= 2:
+        final_direction = "SELL"
+    elif votes["BUY"] > votes["SELL"]:
+        final_direction = "BUY"
+    else:
+        final_direction = "SELL"
+
+    avg_confidence = int(sum(confidences) / len(confidences)) if confidences else 60
+    final_confidence = max(50, min(95, avg_confidence))
+
+    final_reason = "\n".join(reasons) if reasons else "No model provided reasoning."
+    logger.info(f"LLM Vote result: BUY={votes['BUY']}, SELL={votes['SELL']} -> {final_direction} ({final_confidence}%)")
 
     note = ""
     if original_pair and original_pair != pair_code:
