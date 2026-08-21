@@ -89,7 +89,7 @@ async def model_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await query.edit_message_text(
         "Choose AI Model Type for Analysis:\n\n"
-        "👁️ **Vision AI Models** - Chart-based analysis (Gemini Flash, Muse Glimmer 30B, Llama 3.2 11B Vision)\n"
+        "👁️ **Vision AI Models** - Chart-based analysis (Gemini Flash, Nemotron 3 Nano Omni, Dots3-Note Preview)\n"
         "🤖 **LLM Models** - Text-based analysis (Nemotron 3 Ultra, Llama 3.1 8B, Laguna-S 2.1)",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
@@ -468,7 +468,7 @@ def main():
             logger.info("Quotex connection will use proxy from .env: %s", host)
         else:
             logger.warning("No QUOTEX_PROXY / CAMOUFOX_PROXY set in .env — connecting to Quotex DIRECTLY (likely geo-blocked)")
-        logger.info("AI models active: Gemini Flash (chart), Muse Glimmer 30B, Llama 3.2 11B Vision (via NVIDIA)")
+        logger.info("AI models active: Gemini Flash (chart), Nemotron 3 Nano Omni, Dots3-Note Preview (via Kilo)")
         logger.info("LLM models active: Nemotron 3 Ultra (Zen), Llama 3.1 8B (NVIDIA), Laguna-S 2.1 (Kilo)")
         logger.info("Chart image is attached to Gemini Flash for visual confirmation")
     except Exception as e:

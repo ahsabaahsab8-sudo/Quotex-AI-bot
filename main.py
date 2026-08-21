@@ -31,9 +31,9 @@ logger = logging.getLogger(__name__)
 # ─── LATENCY / STALENESS KNOBS ─────────────────────────────────────────
 # Fast-vote: stop waiting for all models as soon as 2 agree in the same
 # direction (majority reached). Hard deadline: whatever votes we have by then
-# are used. All 3 models are vision-capable now (Gemini Flash + Llama 3.2 11B
-# Vision + Muse Glimmer 30B), so the deadline is tightened to keep the
-# signal returning in seconds.
+# are used. All 3 models are vision-capable now (Gemini Flash + Nemotron 3
+# Nano Omni + Dots3-Note, both Kilo vision models), so the deadline is kept
+# tight to keep the signal returning in seconds.
 AI_VOTE_DEADLINE_SECONDS = float(os.getenv("AI_VOTE_DEADLINE_SECONDS", "30"))
 AI_MODEL_TIMEOUT_SECONDS = float(os.getenv("AI_MODEL_TIMEOUT_SECONDS", "60"))
 AI_OUTPUT_MAX_TOKENS = int(os.getenv("AI_OUTPUT_MAX_TOKENS", "2048"))
@@ -46,8 +46,8 @@ LLM_MODEL_TIMEOUT_SECONDS = float(os.getenv("LLM_MODEL_TIMEOUT_SECONDS", "75"))
 DATA_AGE_MULTIPLIER = float(os.getenv("DATA_AGE_MULTIPLIER", "1.5"))
 # Chart-capable model for the 3-model vote: "kilo" (Step 3.7 Flash) or "gemini" (Gemini Flash).
 # All three voters get the same chart image + prompt. Gemini Flash is the fast
-# default (~3.4s, chart filled); the other two are Llama 3.2 11B Vision and
-# Muse Glimmer 30B, both chart-capable on the same NVIDIA keys.
+# default (~3s, chart filled); the other two are Nemotron 3 Nano Omni and
+# Dots3-Note, both chart-capable on their Kilo gateways with reasoning disabled.
 CHART_MODEL = os.getenv("CHART_MODEL", "gemini")
 
 
@@ -1671,6 +1671,189 @@ nvidia_nemotron_client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", 
 NEMOTRON_MODEL = os.getenv("NEMOTRON_MODEL", "meta/muse-glimmer-30b")
 NEMOTRON_MAX_TOKENS = int(os.getenv("NEMOTRON_MAX_TOKENS", "2048"))
 
+# ─── AI: KILO-CODE VISION MODELS (FAST, REASONING DISABLED) ───────────
+# Nemotron 3 Nano Omni (free, via kilo gateway) replaces NVIDIA Muse Glimmer.
+# Dots3-Note Preview (free, via kilo gateway) replaces NVIDIA Llama Vision.
+# reasoning is disabled + max_tokens kept low so both answer ~1-2s like Gemini.
+
+KILO_NEMOTRON_NANO_API_KEY = os.getenv(
+    "KILO_NEMOTRON_NANO_API_KEY",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbnYiOiJwcm9kdWN0aW9uIiwia2lsb1VzZXJJZCI6IjUzNzFmNzkxLThkMzItNGY2Zi05OTQzLTcxOTI2MTkyOWNjNiIsImFwaVRva2VuUGVwcGVyIjpudWxsLCJ2ZXJzaW9uIjozLCJpYXQiOjE3ODcyMjI0MTMsImV4cCI6MTk0NDkwMjQxM30.OiT1WU5iOE3ubJIZHZTkJq4v4bX6GQEHhV0IN7hXEyI",
+)
+KILO_VISION_BASE_URL = "https://api.kilo.ai/api/gateway"
+
+kilo_nemotron_client = OpenAI(
+    base_url=KILO_VISION_BASE_URL, api_key=KILO_NEMOTRON_NANO_API_KEY,
+    timeout=AI_MODEL_TIMEOUT_SECONDS)
+KILO_NEMOTRON_NANO_MODEL = os.getenv("KILO_NEMOTRON_NANO_MODEL", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free")
+KILO_NEMOTRON_NANO_MAX_TOKENS = int(os.getenv("KILO_NEMOTRON_NANO_MAX_TOKENS", "1024"))
+
+KILO_DOTS_NOTE_API_KEY = os.getenv(
+    "KILO_DOTS_NOTE_API_KEY",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbnYiOiJwcm9kdWN0aW9uIiwia2lsb1VzZXJJZCI6IjkwMWI2N2Q3LTEzMmYtNDllNC05YTU1LTUxOGI0YTFlNDNjMSIsImFwaVRva2VuUGVwcGVyIjpudWxsLCJ2ZXJzaW9uIjozLCJpYXQiOjE3ODcyMjI4NDMsImV4cCI6MTk0NDkwMjg0M30.vCqxNit9FdMmFT8hR67sTnDTFQUEmV1MwkBW2GgfBqE",
+)
+kilo_dots_client = OpenAI(
+    base_url=KILO_VISION_BASE_URL, api_key=KILO_DOTS_NOTE_API_KEY,
+    timeout=AI_MODEL_TIMEOUT_SECONDS)
+KILO_DOTS_NOTE_MODEL = os.getenv("KILO_DOTS_NOTE_MODEL", "dots-studio/dots-3-note-preview:free")
+KILO_DOTS_NOTE_MAX_TOKENS = int(os.getenv("KILO_DOTS_NOTE_MAX_TOKENS", "1024"))
+
+
+async def query_nemotron_nano_vote(tech_data: dict, chart_b64: str | None = None, retries: int = 1) -> dict | None:
+    """Nemotron 3 Nano Omni via kilo gateway — vision vote, reasoning disabled.
+
+    Kill all thinking before the JSON: kilo's 'reasoning' param is set to off
+    and max_tokens stays low (default 1024) so it answers in ~1-2s like Gemini.
+    Does NOT use response_format (kilo rejects strict json_schema on this route).
+    """
+    data_json = json.dumps([tech_data], indent=2)
+    prompt = TRADING_PROMPT_TEMPLATE.format(data_json=data_json)
+    if chart_b64:
+        prompt = prompt.replace(
+            "### TIMEFRAME CONTEXT",
+            CHART_IMAGE_PROMPT_SECTION + "\n\n### TIMEFRAME CONTEXT"
+        )
+        user_content = [
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{chart_b64}"}},
+            {"type": "text", "text": prompt},
+        ]
+    else:
+        user_content = prompt
+    for attempt in range(retries + 1):
+        try:
+            completion_task = asyncio.to_thread(
+                kilo_nemotron_client.chat.completions.create,
+                model=KILO_NEMOTRON_NANO_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY the JSON object. No thinking, no preamble, no markdown fences. Start with '{' and end with '}'."},
+                    {"role": "user", "content": user_content}
+                ],
+                temperature=0.2, max_tokens=KILO_NEMOTRON_NANO_MAX_TOKENS,
+                extra_body={"reasoning": {"enabled": False}},
+            )
+            repair_task = asyncio.create_task(
+                _repair_chart_analysis_multi_image(kilo_nemotron_client, KILO_NEMOTRON_NANO_MODEL, chart_b64)
+            ) if chart_b64 else None
+            completion = await completion_task
+            msg = completion.choices[0].message
+            text = (msg.content or "").strip()
+            data = _parse_model_output(text)
+            if data is None:
+                if attempt < retries:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+            if isinstance(data, dict):
+                ca = data.get("chart_analysis")
+                if ca and isinstance(ca, dict):
+                    logger.info(f"Nemotron Nano chart_analysis: " + (json.dumps(ca) if ca else "MISSING"))
+                elif repair_task:
+                    logger.warning("Nemotron Nano skipped chart_analysis, using chart-only repair...")
+                    repair = await repair_task
+                    if repair:
+                        data["chart_analysis"] = repair
+            return data
+        except Exception as e:
+            logger.warning(f"Nemotron Nano vote attempt {attempt+1} failed: {e}")
+            if attempt < retries:
+                await asyncio.sleep(1)
+                continue
+            return None
+    return None
+
+
+async def query_dots_note_vote(tech_data: dict, chart_b64: str | None = None, retries: int = 1) -> dict | None:
+    """Dots3-Note Preview via kilo gateway — vision vote, reasoning disabled.
+
+    reasoning disabled + low max_tokens for a fast (~1-2s) chart-capable vote.
+    """
+    data_json = json.dumps([tech_data], indent=2)
+    prompt = TRADING_PROMPT_TEMPLATE.format(data_json=data_json)
+    if chart_b64:
+        prompt = prompt.replace(
+            "### TIMEFRAME CONTEXT",
+            CHART_IMAGE_PROMPT_SECTION + "\n\n### TIMEFRAME CONTEXT"
+        )
+        user_content = [
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{chart_b64}"}},
+            {"type": "text", "text": prompt},
+        ]
+    else:
+        user_content = prompt
+    for attempt in range(retries + 1):
+        try:
+            completion_task = asyncio.to_thread(
+                kilo_dots_client.chat.completions.create,
+                model=KILO_DOTS_NOTE_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY the JSON object. No thinking, no preamble, no markdown fences. Start with '{' and end with '}'."},
+                    {"role": "user", "content": user_content}
+                ],
+                temperature=0.2, max_tokens=KILO_DOTS_NOTE_MAX_TOKENS,
+                extra_body={"reasoning": {"enabled": False}},
+            )
+            repair_task = asyncio.create_task(
+                _repair_chart_analysis_multi_image(kilo_dots_client, KILO_DOTS_NOTE_MODEL, chart_b64)
+            ) if chart_b64 else None
+            completion = await completion_task
+            text = (completion.choices[0].message.content or "").strip()
+            data = _parse_model_output(text)
+            if data is None:
+                if attempt < retries:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+            if isinstance(data, dict):
+                ca = data.get("chart_analysis")
+                if ca and isinstance(ca, dict):
+                    logger.info(f"Dots3-Note chart_analysis: " + (json.dumps(ca) if ca else "MISSING"))
+                elif repair_task:
+                    logger.warning("Dots3-Note skipped chart_analysis, using chart-only repair...")
+                    repair = await repair_task
+                    if repair:
+                        data["chart_analysis"] = repair
+                        logger.info(f"Dots3-Note chart_analysis (repair): " + json.dumps(repair))
+                    else:
+                        logger.warning("Dots3-Note chart-only repair failed")
+            return data
+        except Exception as e:
+            logger.warning(f"Dots3-Note vote attempt {attempt+1} failed: {e}")
+            if attempt < retries:
+                await asyncio.sleep(1)
+                continue
+            return None
+    return None
+
+
+async def _repair_chart_analysis_multi_image(client, model: str, chart_b64: str, max_tokens: int = 1024, timeout: float = 60.0) -> dict | None:
+    """Chart-only repair call that works on both OpenAI and kilo gateway routes:
+    sends the image as a list payload (used by the two new kilo vision models).
+    """
+    if not chart_b64:
+        return None
+    try:
+        completion = await asyncio.wait_for(asyncio.to_thread(
+            client.chat.completions.create,
+            model=model,
+            messages=[
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{chart_b64}"}},
+                    {"type": "text", "text": CHART_ONLY_PROMPT_TEMPLATE},
+                ]},
+            ],
+            temperature=0.2, max_tokens=max_tokens,
+            extra_body={"reasoning": {"enabled": False}},
+        ), timeout=timeout)
+        text = ((completion.choices[0].message.content or "") or "").strip()
+        parsed = _parse_model_output(text)
+        if isinstance(parsed, dict) and parsed.get("visual_trend"):
+            return parsed
+        return None
+    except Exception as e:
+        logger.warning(f"chart-only repair for {model} failed: {e}")
+        return None
+
+
 CHART_ONLY_PROMPT_TEMPLATE = (
     "Look carefully at the attached candlestick chart image."
     ' Reply with ONLY a JSON object, no other text, exactly this shape:\n'
@@ -1857,10 +2040,10 @@ async def query_llama_vote(tech_data: dict, chart_b64: str | None = None, retrie
 LLM_NEMOTRON_ULTRA_KEY = os.getenv("OPENCODE_ZEN_KEY", "sk-5UVZdq3bAXTbOm55FiX8LqZIy4gKz2VFs5MVdU7QFfsqXQ8evXzVDU3Y0Tc5qY32")
 llm_nemotron_ultra_client = OpenAI(base_url="https://opencode.ai/zen/v1", api_key=LLM_NEMOTRON_ULTRA_KEY, timeout=AI_MODEL_TIMEOUT_SECONDS)
 LLM_NEMOTRON_ULTRA_MODEL = "nemotron-3-ultra-free"
-# Nemotron 3 Ultra is reasoning-heavy: it spends output tokens on chain-of-thought
-# BEFORE the JSON. A tiny cap truncates it (finish=length, empty JSON). It needs
-# ~3072 to reliably emit the full signal within the 30-40s window.
-LLM_NEMOTRON_MAX_TOKENS = int(os.getenv("LLM_NEMOTRON_MAX_TOKENS", "3072"))
+# Nemotron Ultra used to be reasoning-heavy (chain-of-thought before the JSON),
+# so it needed ~3072 tokens. reasoning is now disabled and the cap is lowered to
+# keep its LLM vote fast like Llama.
+LLM_NEMOTRON_MAX_TOKENS = int(os.getenv("LLM_NEMOTRON_MAX_TOKENS", "1024"))
 # Baseline budget for the fast text LLMs (default 1024 keeps them quick).
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "1024"))
 
@@ -1872,8 +2055,8 @@ KILO_LLM_MODEL = "poolside/laguna-s-2.1:free"
 KILO_LLM_BASE_URL = os.getenv("KILO_LLM_BASE_URL", "https://api.kilo.ai/api/gateway")
 KILO_LLM_API_KEY = os.getenv("KILO_API_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbnYiOiJwcm9kdWN0aW9uIiwia2lsb1VzZXJJZCI6ImQyYjRjOTIwLTYwYTAtNGQwZS04ZjliLWQ4MDAyNjI5MzIwMCIsImFwaVRva2VuUGVwcGVyIjpudWxsLCJ2ZXJzaW9uIjozLCJpYXQiOjE3ODY1MTk4MjEsImV4cCI6MTk0NDE5OTgyMX0.WhsCfQWhMCyJzeacsekuRTurBjqQr6iEUwx4ln-SK34")
 kilo_llm_client = OpenAI(base_url=KILO_LLM_BASE_URL, api_key=KILO_LLM_API_KEY, timeout=AI_MODEL_TIMEOUT_SECONDS)
-# Laguna-S 2.1 also spends some tokens on reasoning; 2048 lets it emit the JSON.
-LLM_LAGUNA_MAX_TOKENS = int(os.getenv("LLM_LAGUNA_MAX_TOKENS", "2048"))
+# Laguna-S 2.1: reasoning disabled + 1024-token cap so it votes fast (was 2048).
+LLM_LAGUNA_MAX_TOKENS = int(os.getenv("LLM_LAGUNA_MAX_TOKENS", "1024"))
 
 
 async def query_llm_nemotron_ultra(tech_data: dict, retries: int = 2) -> dict | None:
@@ -1888,7 +2071,8 @@ async def query_llm_nemotron_ultra(tech_data: dict, retries: int = 2) -> dict | 
                     {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.2, max_tokens=LLM_NEMOTRON_MAX_TOKENS
+                temperature=0.2, max_tokens=LLM_NEMOTRON_MAX_TOKENS,
+                extra_body={"reasoning": {"enabled": False}},
             )
             text = completion.choices[0].message.content.strip()
             text = text.replace("```json", "").replace("```", "").strip()
@@ -1974,7 +2158,8 @@ async def query_llm_kilo_ling(tech_data: dict, retries: int = 2) -> dict | None:
                     {"role": "system", "content": "You are a precise quantitative trading assistant. Output ONLY valid JSON. Start with '{' and end with '}'."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.2, max_tokens=LLM_LAGUNA_MAX_TOKENS
+                temperature=0.2, max_tokens=LLM_LAGUNA_MAX_TOKENS,
+                extra_body={"reasoning": {"enabled": False}},
             )
             text = completion.choices[0].message.content.strip()
             text = text.replace("```json", "").replace("```", "").strip()
@@ -2129,8 +2314,8 @@ async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: 
     # We stop as soon as 2 models agree (majority) or the deadline passes.
     # Model lineup (all three are vision-capable and get the same chart image):
     #   1. Gemini Flash (chart-capable, first model)
-    #   2. Muse Glimmer 30B via NVIDIA (second model)
-    #   3. Llama 3.2 11B Vision via NVIDIA (third model, low-token fast response)
+    #   2. Nemotron 3 Nano Omni via Kilo (second model, reasoning disabled, fast)
+    #   3. Dots3-Note Preview via Kilo (third model, reasoning disabled, fast)
     if CHART_MODEL == "gemini":
         chart_label = "Gemini Flash"
         chart_coro = query_gemini_flash_analysis(summary, chart_b64=chart_b64)
@@ -2139,8 +2324,8 @@ async def query_all_models(tech_data: dict, pair_code: str = "", original_pair: 
         chart_coro = query_kilo_step_analysis(summary, chart_b64=chart_b64)
     pending = {
         chart_label: _guarded(chart_label, chart_coro),
-        "Muse Glimmer 30B": _guarded("Muse Glimmer 30B", query_nemotron_vote(summary, chart_b64=chart_b64)),
-        "Llama 3.2 11B Vision": _guarded("Llama 3.2 11B Vision", query_llama_vote(summary, chart_b64=chart_b64)),
+        "Nemotron 3 Nano": _guarded("Nemotron 3 Nano", query_nemotron_nano_vote(summary, chart_b64=chart_b64)),
+        "Dots3-Note": _guarded("Dots3-Note", query_dots_note_vote(summary, chart_b64=chart_b64)),
     }
     pending_tasks = {asyncio.ensure_future(coro): name for name, coro in pending.items()}
 

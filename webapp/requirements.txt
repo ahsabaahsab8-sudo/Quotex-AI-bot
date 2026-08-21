@@ -1,0 +1,21 @@
+# Quotex AI Pro Dashboard — run locally:
+#   python -m uvicorn webapp.app:app --host 0.0.0.0 --port 8000
+
+# Optional env (put in .env):
+#   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET  → real Google login
+#   ALLOW_DEMO_LOGIN=1                       → demo login button (default on if no Google ID)
+#   DASHBOARD_JWT_SECRET                     → session cookie signing
+#   STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET → real checkout (mock used otherwise)
+#   DASHBOARD_BASE_URL=http://localhost:8000
+
+fastapi==0.141.1
+uvicorn==0.52.3
+sqlalchemy==2.0.52
+aiosqlite==0.22.1
+google-auth>=2.30
+PyJWT>=2.8
+python-multipart>=0.0.9
+
+# Bot/AI stack already used by the project (imported by webapp .signal_runner):
+#   openai, pandas, numpy, ta, python-dotenv, requests, websockets
+#   + pyquotex (git install), chart_render, chart_capture, renew_ssid
